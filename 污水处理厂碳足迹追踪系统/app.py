@@ -1517,11 +1517,13 @@ with tab5:
 
     # 第三部分：进行预测
     st.subheader("3. 预测设置")
-    predict_col1, predict_col2, predict_col3 = st.columns([1, 1, 2])
+    predict_col1, predict_col2, predict_col3 = st.columns([2, 1, 3])
     with predict_col1:
         prediction_days = st.slider("预测天数", 7, 30, 7, key="prediction_days")
 
     with predict_col2:
+        st.write("")
+        st.write("")
         if st.button("进行预测", key="predict_btn"):
             if st.session_state.lstm_predictor is not None:
                 with st.spinner("正在进行预测..."):
@@ -1564,7 +1566,7 @@ with tab5:
                             historical_data = df_with_emissions[['日期', 'total_CO2eq']].tail(30)
                             st.markdown("<br><br>", unsafe_allow_html=True)  # 添加两行空白
                             fig = vis.create_carbon_trend_chart(historical_data, prediction_data)
-                            st.plotly_chart(fig, use_container_width=True)
+                            st.plotly_chart(fig, use_container_width=True, height=600)
 
                             # 显示预测数值
                             # 显示预测数值
@@ -1657,7 +1659,7 @@ with tab5:
 
                 historical_data = df_with_emissions[['日期', 'total_CO2eq']].tail(30)
                 fig = vis.create_carbon_trend_chart(historical_data, simple_prediction)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, height=400)
 
                 st.info("这是基于历史平均值的简单预测，精度较低")
 
