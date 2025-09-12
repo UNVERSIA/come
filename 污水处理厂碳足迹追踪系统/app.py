@@ -1521,7 +1521,7 @@ with tab5:
     predict_col1, predict_col2, predict_col3 = st.columns([1, 1, 2])
 
     with predict_col1:
-        prediction_days = st.slider("预测天数", 30, 365, 90, key="prediction_days") # 30-365天，默认90天
+        prediction_days = st.slider("预测天数", 30, 730, 365, key="prediction_days") # 30-365天，默认90天
 
     with predict_col2:
         # 替换预测按钮点击事件的处理代码
@@ -1536,13 +1536,12 @@ with tab5:
                             df_with_emissions = calculator.calculate_indirect_emissions(df_with_emissions)
                             df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
 
-                            # 进行预测
-                            recent_data = df_with_emissions.tail(90)  # 使用最近90天数据
-
                             # 确保使用正确的预测方法
                             prediction_df = st.session_state.lstm_predictor.predict(
-                                recent_data, 'total_CO2eq', steps=prediction_days
+                                df_with_emissions,'total_CO2eq', steps=prediction_days
                             )
+
+                            st.session_state.prediction_data = prediction_df
 
                             # 确保预测结果是DataFrame
                             if isinstance(prediction_df, pd.DataFrame):
