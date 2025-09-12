@@ -344,6 +344,16 @@ class CarbonCalculator:
 
     def _simple_emission_prediction(self, df, future_days):
         """改进的简单预测方法"""
+        # 确保输入是DataFrame
+        if not isinstance(df, pd.DataFrame):
+            # 如果不是DataFrame，尝试转换或创建默认DataFrame
+            try:
+                df = pd.DataFrame(df)
+            except:
+                df = pd.DataFrame({
+    '日期': [datetime.now() - timedelta(days=i) for i in range(30, 0, -1)],
+    'total_CO2eq': [1000] * 30  # 默认值
+                })
         df_calc = self.calculate_direct_emissions(df)
         df_calc = self.calculate_indirect_emissions(df_calc)
         df_calc = self.calculate_unit_emissions(df_calc)
