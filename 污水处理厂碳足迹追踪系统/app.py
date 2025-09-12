@@ -1569,21 +1569,23 @@ with tab5:
                             # 显示预测数值
                             st.subheader("预测结果详情")
                             if not prediction_data.empty:
-                                # 格式化显示预测数据
-                                display_df = prediction_data.copy()
-                                display_df['日期'] = display_df['日期'].dt.strftime('%Y-%m-%d')
-                                display_df.rename(columns={
-                                    'predicted_CO2eq': '预测碳排放(kgCO2eq)',
-                                    'lower_bound': '预测下限(kgCO2eq)',
-                                    'upper_bound': '预测上限(kgCO2eq)'
-                                }, inplace=True)
+                                # 使用全宽容器显示表格
+                                with st.container():
+                                    # 格式化显示预测数据
+                                    display_df = prediction_data.copy()
+                                    display_df['日期'] = display_df['日期'].dt.strftime('%Y-%m-%d')
+                                    display_df.rename(columns={
+                                        'predicted_CO2eq': '预测碳排放(kgCO2eq)',
+                                        'lower_bound': '预测下限(kgCO2eq)',
+                                        'upper_bound': '预测上限(kgCO2eq)'
+                                    }, inplace=True)
 
-                                # 设置更友好的显示格式
-                                for col in ['预测碳排放(kgCO2eq)', '预测下限(kgCO2eq)', '预测上限(kgCO2eq)']:
-                                    display_df[col] = display_df[col].round(1)
+                                    # 设置更友好的显示格式
+                                    for col in ['预测碳排放(kgCO2eq)', '预测下限(kgCO2eq)', '预测上限(kgCO2eq)']:
+                                        display_df[col] = display_df[col].round(1)
 
-                                # 使用全宽显示表格
-                                st.dataframe(display_df, width=1000)
+                                    # 使用全宽显示表格
+                                    st.dataframe(display_df, use_container_width=True)  # 使用全宽
 
                                 # 计算并显示变化趋势
                                 current_avg = historical_data['total_CO2eq'].mean()
