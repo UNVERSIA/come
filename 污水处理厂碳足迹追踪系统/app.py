@@ -1535,9 +1535,18 @@ with tab5:
                                     recent_data, 'total_CO2eq', steps=prediction_days
                                 )
 
-                                # 生成预测结果
+                                # 生成预测结果 - 确保日期正确
                                 last_date = df_with_emissions['日期'].max()
                                 future_dates = [last_date + timedelta(days=i) for i in range(1, prediction_days + 1)]
+
+                                # 确保预测值与日期数量匹配
+                                if len(prediction_values) != len(future_dates):
+                                    # 如果数量不匹配，进行截断或填充
+                                    prediction_values = prediction_values[:len(future_dates)]
+                                    if len(prediction_values) < len(future_dates):
+                                        # 使用最后一个预测值填充
+                                        prediction_values.extend(
+                                            [prediction_values[-1]] * (len(future_dates) - len(prediction_values)))
 
                                 # 创建预测数据 - 添加置信区间
                                 mean_prediction = np.mean(prediction_values) if prediction_values else 0
