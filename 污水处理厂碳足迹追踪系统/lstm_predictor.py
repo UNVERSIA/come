@@ -424,7 +424,6 @@ class CarbonLSTMPredictor:
         })
 
         return result_df
-
     def generate_future_dates(self, last_date, days=7):
         """生成未来日期序列"""
         return [last_date + timedelta(days=i) for i in range(1, days + 1)]
