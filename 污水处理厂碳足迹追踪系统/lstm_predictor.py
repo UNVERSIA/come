@@ -284,23 +284,22 @@ class CarbonLSTMPredictor:
                 self.model.compile(optimizer='adam', loss='mse', metrics=['mae'])
 
     # 在CarbonLSTMPredictor类中修改predict方法
-    def predict(self, df, target_column='total_CO2eq', steps=365):  # 改为预测一年
+    # 在CarbonLSTMPredictor类中修改predict方法
+    def predict(self, df, target_column='total_CO2eq', steps=365):
         """科学的多步预测方法 - 完全重写"""
         if self.model is None:
             raise ValueError("模型未加载，请先加载或训练模型")
 
-        # 确保数据有足够的历史记录
+        # 0. 数据准备与校验
+        df = df.sort_values('日期').reset_index(drop=True)
         if len(df) < self.sequence_length:
             raise ValueError(f"需要至少{self.sequence_length}天的历史数据，当前只有{len(df)}天")
-
-        # 确保日期列存在
         if '日期' not in df.columns:
             raise ValueError("数据必须包含'日期'列")
 
-        # 准备历史数据
+        # 1. 准备历史数据 - 使用提供的完整历史数据
         historical_data = df.copy()
-
-        # 计算碳排放（如果尚未计算）
+        # 确保目标列已计算
         if target_column not in historical_data.columns:
             from carbon_calculator import CarbonCalculator
             calculator = CarbonCalculator()
@@ -308,122 +307,99 @@ class CarbonLSTMPredictor:
             historical_data = calculator.calculate_indirect_emissions(historical_data)
             historical_data = calculator.calculate_unit_emissions(historical_data)
 
-        # 使用科学的多步预测方法
-        predictions = []
-        confidence_intervals = []
+        # 2. 初始化预测序列：使用最后`sequence_length`天的数据
         current_sequence = historical_data.tail(self.sequence_length).copy()
+        all_predictions = []
+        all_dates = []
 
+        # 3. 多步预测循环
         for step in range(steps):
             try:
-                # 准备输入数据 - 使用最近sequence_length天的数据
+                # 3.1 准备当前时间步的输入
                 X_input = []
                 for col in self.feature_columns:
                     if col in current_sequence.columns and col in self.feature_scalers:
-                        # 获取并缩放特征数据
                         col_data = current_sequence[col].values[-self.sequence_length:]
                         scaled_data = self.feature_scalers[col].transform(col_data.reshape(-1, 1))
                         X_input.append(scaled_data.flatten())
                     else:
-                        # 对于缺失的特征，使用默认值
-                        default_value = 0 if col != '日期' else current_sequence['日期'].iloc[-1]
-                        scaled_default = np.array([default_value] * self.sequence_length)
-                        X_input.append(scaled_default)
+                        # 对于模型训练时未见过的特征，使用默认值（应避免此情况）
+                        raise ValueError(f"特征 '{col}' 在缩放器或数据中未找到。")
 
-                # 创建正确的输入形状 [1, sequence_length, num_features]
+                # 堆叠特征并调整形状为 [1, sequence_length, num_features]
                 X_input = np.stack(X_input, axis=1)
                 X_input = X_input.reshape(1, self.sequence_length, len(self.feature_columns))
 
-                # 进行预测
+                # 3.2 进行单步预测
                 scaled_prediction = self.model.predict(X_input, verbose=0)[0][0]
-
-                # 反缩放预测结果
                 prediction = self.feature_scalers[target_column].inverse_transform(
                     [[scaled_prediction]]
                 )[0][0]
+                prediction = max(0, prediction)  # 碳排放不为负
+                all_predictions.append(prediction)
 
-                # 确保预测值合理
-                prediction = max(0, prediction)
-                predictions.append(prediction)
+                # 3.3 为下一步预测创建新行（关键步骤：更新所有特征！）
+                last_date = current_sequence['日期'].iloc[-1]
+                next_date = last_date + pd.Timedelta(days=1)
+                all_dates.append(next_date)
 
-                # 创建新的数据行 - 使用更科学的方法更新所有特征
+                # 创建一个新的DataFrame行，初始化为最后一天的值
                 new_row = current_sequence.iloc[-1:].copy()
+                new_row['日期'] = next_date
 
-                # 更新目标列
-                new_row[target_column] = prediction
-
-                # 更新日期（递增一天）
-                last_date = current_sequence['日期'].max()
-                new_row['日期'] = last_date + pd.Timedelta(days=1)
-
-                # 对于其他特征，使用时间序列预测或合理的估计方法
+                # --- 核心改进：科学地更新特征，而不是用旧值 ---
+                # 方法：对于每个特征，使用其历史趋势（如移动平均）进行外推，并添加合理的噪声和季节性。
                 for col in self.feature_columns:
-                    if col != target_column and col != '日期':
-                        if col in current_sequence.columns:
-                            # 使用ARIMA或简单趋势预测来更新特征
-                            series = current_sequence[col].values
-                            if len(series) >= 3:  # 至少有3个点才能计算趋势
-                                # 简单线性趋势外推
-                                x = np.arange(len(series))
-                                coeffs = np.polyfit(x, series, 1)
-                                trend_value = np.polyval(coeffs, len(series))
+                    if col == target_column:
+                        # 目标列用预测值更新
+                        new_row[target_column] = prediction
+                    elif col in current_sequence.columns:
+                        # 对其他特征进行简单的时间序列预测（例如：基于近期趋势和季节性）
+                        series = current_sequence[col].values
+                        # 使用一个简单的策略：近期平均值 + 小幅随机波动 + 季节性分量
+                        recent_avg = np.mean(series[-7:])  # 一周的平均值
+                        seasonal_comp = 0.1 * recent_avg * np.sin(2 * np.pi * (step % 365) / 365)  # 简单的年季节性
+                        noise = np.random.normal(0, recent_avg * 0.02)  # 2%的噪声
+                        predicted_value = recent_avg + seasonal_comp + noise
+                        predicted_value = max(0, predicted_value)  # 确保值合理
+                        new_row[col] = predicted_value
 
-                                # 添加一些季节性变化和随机噪声
-                                seasonal = 0.1 * trend_value * np.sin(2 * np.pi * (step % 365) / 365)
-                                noise = 0.05 * trend_value * np.random.normal(0, 1)
-
-                                new_value = trend_value + seasonal + noise
-                                new_row[col] = max(0, new_value)
-                            else:
-                                # 使用最后的值
-                                new_row[col] = series[-1]
-                        else:
-                            # 使用合理的默认值
-                            if '水量' in col:
-                                new_row[col] = 10000  # 默认处理水量
-                            elif '电耗' in col:
-                                new_row[col] = 3000  # 默认电耗
-                            else:
-                                new_row[col] = 0
-
-                # 添加到序列中，保持序列长度不变
-                current_sequence = pd.concat([current_sequence, new_row])
-                current_sequence = current_sequence.tail(self.sequence_length)
-
-                # 计算置信区间（使用历史误差的统计）
-                if len(predictions) > 1:
-                    errors = np.abs(np.diff(predictions[-10:])) if len(predictions) > 10 else np.array(
-                        [predictions[0] * 0.1])
-                    std_error = np.std(errors) if len(errors) > 0 else predictions[-1] * 0.1
-                    confidence_intervals.append(std_error)
-                else:
-                    confidence_intervals.append(predictions[-1] * 0.1)
+                # 3.4 将新行追加到序列中，并移除最旧的一行，保持序列长度不变
+                current_sequence = pd.concat([current_sequence, new_row], ignore_index=True)
+                current_sequence = current_sequence.tail(self.sequence_length).reset_index(drop=True)
 
             except Exception as e:
                 print(f"第{step + 1}步预测失败: {str(e)}")
-                # 使用最后有效预测值
-                if predictions:
-                    predictions.append(predictions[-1])
-                    confidence_intervals.append(
-                        confidence_intervals[-1] if confidence_intervals else predictions[-1] * 0.1)
-                else:
-                    # 使用历史平均值
-                    hist_avg = historical_data[target_column].mean()
-                    predictions.append(hist_avg)
-                    confidence_intervals.append(hist_avg * 0.1)
+                # 如果失败，使用最后有效预测值或历史平均值
+                fallback_value = all_predictions[-1] if all_predictions else historical_data[target_column].mean()
+                all_predictions.append(fallback_value)
+                # 确保日期仍然增加
+                next_date = last_date + pd.Timedelta(days=1) if 'last_date' in locals() else \
+                historical_data['日期'].iloc[-1] + pd.Timedelta(days=step + 1)
+                all_dates.append(next_date)
 
-        # 生成未来日期
-        last_date = historical_data['日期'].max()
-        future_dates = [last_date + pd.Timedelta(days=i + 1) for i in range(steps)]
-
-        # 创建预测结果DataFrame
+        # 4. 生成预测结果DataFrame
         result_df = pd.DataFrame({
-            '日期': future_dates,
-            'predicted_CO2eq': predictions,
-            'lower_bound': [max(0, p - ci) for p, ci in zip(predictions, confidence_intervals)],
-            'upper_bound': [p + ci for p, ci in zip(predictions, confidence_intervals)]
+            '日期': all_dates,
+            'predicted_CO2eq': all_predictions
         })
 
+        # 5. 计算置信区间（可以使用预测误差的历史标准差）
+        # 这里简化处理，使用一个固定的百分比区间
+        error_std = historical_data[target_column].pct_change().std() * 100  # 历史日变化率的标准差
+        if np.isnan(error_std):
+            error_std = 10  # 默认10%的波动
+        confidence_width = error_std * 0.5  # 缩放一下
+
+        result_df['lower_bound'] = result_df['predicted_CO2eq'] * (1 - confidence_width / 100)
+        result_df['upper_bound'] = result_df['predicted_CO2eq'] * (1 + confidence_width / 100)
+
+        # 确保边界合理
+        result_df['lower_bound'] = result_df['lower_bound'].clip(lower=0)
+        result_df['upper_bound'] = result_df['upper_bound'].clip(lower=0)
+
         return result_df
+
     def generate_future_dates(self, last_date, days=7):
         """生成未来日期序列"""
         return [last_date + timedelta(days=i) for i in range(1, days + 1)]
