@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from datetime import timedelta
+from datetime import datetime, timedelta
 from factor_database import CarbonFactorDatabase
 
 
@@ -351,9 +351,10 @@ class CarbonCalculator:
                 df = pd.DataFrame(df)
             except:
                 df = pd.DataFrame({
-    '日期': [datetime.now() - timedelta(days=i) for i in range(30, 0, -1)],
-    'total_CO2eq': [1000] * 30  # 默认值
+                    '日期': [datetime.now() - timedelta(days=i) for i in range(30, 0, -1)],
+                    'total_CO2eq': [1000] * 30  # 默认值
                 })
+
         df_calc = self.calculate_direct_emissions(df)
         df_calc = self.calculate_indirect_emissions(df_calc)
         df_calc = self.calculate_unit_emissions(df_calc)
