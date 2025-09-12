@@ -1529,28 +1529,42 @@ with tab5:
 
                             # 进行预测
                             recent_data = df_with_emissions.tail(30)  # 使用最近30天数据
-                            prediction = st.session_state.lstm_predictor.predict(recent_data, 'total_CO2eq')
-                            # 如果预测返回的是多个值，只取第一个
-                            if isinstance(prediction, list) and len(prediction) > 0:
-                                prediction = prediction[0]
+                            try:
+                                # 使用科学的多步预测
+                                prediction_values = st.session_state.lstm_predictor.predict(
+                                    recent_data, 'total_CO2eq', steps=prediction_days
+                                )
 
-                            # 生成预测结果
-                            last_date = df_with_emissions['日期'].max()
-                            future_dates = [last_date + timedelta(days=i) for i in range(1, prediction_days + 1)]
+                                # 生成预测结果
+                                last_date = df_with_emissions['日期'].max()
+                                future_dates = [last_date + timedelta(days=i) for i in range(1, prediction_days + 1)]
 
-                            # 创建预测数据
-                            prediction_data = pd.DataFrame({
-                                '日期': future_dates,
-                                'predicted_CO2eq': [prediction],
-                                'lower_bound': [prediction * 0.9] * prediction_days,
-                                'upper_bound': [prediction * 1.1] * prediction_days
-                            })
+                                # 创建预测数据 - 添加置信区间
+                                mean_prediction = np.mean(prediction_values) if prediction_values else 0
+                                std_prediction = np.std(prediction_values) if len(
+                                    prediction_values) > 1 else mean_prediction * 0.1
 
-                            # 保存预测结果到session_state
-                            st.session_state.prediction_data = prediction_data
-                            st.session_state.historical_data = df_with_emissions[['日期', 'total_CO2eq']].tail(30)
-                            st.session_state.prediction = prediction
-                            st.session_state.prediction_made = True
+                                prediction_data = pd.DataFrame({
+                                    '日期': future_dates,
+                                    'predicted_CO2eq': prediction_values,
+                                    'lower_bound': [max(0, p - std_prediction) for p in prediction_values],
+                                    'upper_bound': [p + std_prediction for p in prediction_values]
+                                })
+
+                                # 保存预测结果到session_state
+                                st.session_state.prediction_data = prediction_data
+                                st.session_state.historical_data = df_with_emissions[['日期', 'total_CO2eq']].tail(30)
+                                st.session_state.prediction = mean_prediction
+                                st.session_state.prediction_made = True
+
+                            except Exception as e:
+                                st.error(f"预测失败: {str(e)}")
+                                #  fallback到简单预测
+                                calculator = CarbonCalculator()
+                                simple_prediction = calculator._simple_emission_prediction(df_with_emissions,
+                                                                                           prediction_days)
+                                st.session_state.prediction_data = simple_prediction
+                                st.session_state.prediction_made = True
 
                         else:
                             st.warning("请先上传数据")
