@@ -1118,21 +1118,21 @@ with tab2:
         st.subheader("工艺全流程碳排热力图")
         if st.session_state.emission_data:
             heatmap_fig = vis.create_heatmap_overlay(st.session_state.emission_data)
-            st.plotly_chart(heatmap_fig, width='stretch')
+            st.plotly_chart(heatmap_fig)
         else:
             st.warning("请先上传运行数据")
     with col2:
         st.subheader("碳流动态追踪图谱")
         if 'df_calc' in st.session_state and st.session_state.df_calc is not None:
             sankey_fig = vis.create_sankey_diagram(st.session_state.df_calc)
-            st.plotly_chart(sankey_fig, width='stretch')
+            st.plotly_chart(sankey_fig)
         else:
             st.warning("请先上传运行数据")
     # 碳排放效率排行榜
     if 'df_calc' in st.session_state and st.session_state.df_calc is not None:
         st.subheader("碳排放效率排行榜")
         eff_fig = vis.create_efficiency_ranking(st.session_state.df_calc)
-        st.plotly_chart(eff_fig, width='stretch')
+        st.plotly_chart(eff_fig)
 
 with tab3:
     st.header("碳账户管理")
@@ -1178,7 +1178,7 @@ with tab3:
 
 
         styled_account = account_df.style.applymap(color_negative_red, subset=['净排放(kgCO2eq)'])
-        st.dataframe(styled_account, width='stretch', height=300)
+        st.dataframe(styled_account, height=300)
         # 自定义公式计算器
         st.subheader("自定义公式计算器")
         st.markdown("""
@@ -1401,7 +1401,7 @@ with tab3:
                     ay=-40,
                     font=dict(color="black")  # 标注文字颜色改为黑色
                 )
-                st.plotly_chart(opt_fig, width='stretch')
+                st.plotly_chart(opt_fig)
                 # 显示优化细节
                 st.subheader("优化措施详情")
                 col1, col2 = st.columns(2)
@@ -1660,19 +1660,19 @@ with tab6:
 
             # 显示技术对比图表
             tech_fig = vis.create_technology_comparison(comparison_results)
-            st.plotly_chart(tech_fig, width='stretch')
+            st.plotly_chart(tech_fig)
 
             # 显示详细对比表格
             st.subheader("技术经济性分析")
-            st.dataframe(comparison_results, width='stretch')
+            st.dataframe(comparison_results)
 
     # 显示技术对比图表
     tech_fig = vis.create_technology_comparison(st.session_state.tech_comparison_data)
-    st.plotly_chart(tech_fig, width='stretch')
+    st.plotly_chart(tech_fig)
 
     # 技术详情表格
     st.subheader("减排技术详情")
-    st.dataframe(st.session_state.tech_comparison_data, width='stretch')
+    st.dataframe(st.session_state.tech_comparison_data)
 
     # 技术适用性分析
     st.subheader("技术适用性分析")
@@ -1729,7 +1729,7 @@ with tab7:
             lambda x: ['background-color: #e6f3ff' if x['factor_type'] in ['电力', 'N2O', 'CH4'] else '' for i in x],
             axis=1
         )
-        st.dataframe(styled_df, width='stretch', height=300)
+        st.dataframe(styled_df, height=300)
         st.caption("注：高亮因子来源于中国生态环境部官方文件或IPCC第六次评估报告(AR6)。")
     except Exception as e:
         st.error(f"获取因子数据失败: {e}")
@@ -1773,7 +1773,7 @@ with tab7:
                 xaxis_title="生效日期", yaxis_title="排放因子 (kgCO2/kWh)",
                 font=dict(size=14, color="black")
             )
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig)
         else:
             st.info("暂无电力排放因子历史数据")
     except Exception as e:
