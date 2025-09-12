@@ -1429,7 +1429,11 @@ with tab5:
             with st.spinner("正在加载预训练模型..."):
                 try:
                     # 检查模型文件是否存在
-                    model_path = "models/carbon_lstm.keras"
+                    model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "carbon_lstm.keras")
+                    # 添加路径调试信息
+                    st.write(f"当前工作目录: {os.getcwd()}")
+                    st.write(f"模型路径: {model_path}")
+                    st.write(f"模型文件存在: {os.path.exists(model_path)}")
 
                     # 尝试多个可能的模型路径
                     possible_paths = [
@@ -1477,11 +1481,15 @@ with tab5:
             with st.spinner("正在训练新模型，这可能需要较长时间..."):
                 try:
                     if st.session_state.df is not None:
-                        # 计算碳排放数据
-                        calculator = CarbonCalculator()
-                        df_with_emissions = calculator.calculate_direct_emissions(st.session_state.df)
-                        df_with_emissions = calculator.calculate_indirect_emissions(df_with_emissions)
-                        df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
+                        # 优先使用已计算的数据
+                        if st.session_state.df_calc is not None:
+                            df_with_emissions = st.session_state.df_calc
+                        else:
+                            # 计算碳排放数据
+                            calculator = CarbonCalculator()
+                            df_with_emissions = calculator.calculate_direct_emissions(st.session_state.df)
+                            df_with_emissions = calculator.calculate_indirect_emissions(df_with_emissions)
+                            df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
 
                         # 训练模型
                         predictor = CarbonLSTMPredictor()
@@ -1526,7 +1534,19 @@ with tab5:
                             df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
 
                             # 进行预测
-                            prediction = st.session_state.lstm_predictor.predict(df_with_emissions)
+                            if 'total_CO2eq' not in df_with_emissions.columns:
+                                st.error("数据中缺少'total_CO2eq'列，请检查数据格式")
+                                # 尝试重新计算碳排放
+                                df_with_emissions = calculator.calculate_unit_emissions(
+                                    calculator.calculate_indirect_emissions(
+                                        calculator.calculate_direct_emissions(df_with_emissions)
+                                    )
+                                )
+
+                            if 'total_CO2eq' in df_with_emissions.columns:
+                                prediction = st.session_state.lstm_predictor.predict(df_with_emissions)
+                            else:
+                                st.error("无法计算碳排放数据，请检查输入数据")
 
                             # 生成预测结果
                             last_date = df_with_emissions['日期'].max()
