@@ -293,6 +293,10 @@ class CarbonLSTMPredictor:
         if len(df) < self.sequence_length:
             raise ValueError(f"需要至少{self.sequence_length}天的历史数据，当前只有{len(df)}天")
 
+        # 确保日期列存在
+        if '日期' not in df.columns:
+            raise ValueError("数据必须包含'日期'列")
+
         # 准备历史数据
         historical_data = df.copy()
 
