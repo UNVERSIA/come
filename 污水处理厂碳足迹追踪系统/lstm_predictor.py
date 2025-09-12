@@ -34,34 +34,63 @@ class CarbonLSTMPredictor:
         ]
 
     def prepare_training_data(self, df, target_column='total_CO2eq'):
-        """准备训练数据"""
+        """准备训练数据 - 修复数组长度问题"""
         # 确保数据按日期排序
         df = df.sort_values('日期').reset_index(drop=True)
+
+        # 检查并处理缺失值
+        for col in self.feature_columns + [target_column]:
+            if col not in df.columns:
+                # 对于确实不存在的列，使用前向填充或插值
+                if col == target_column:
+                    # 对于目标列，使用碳计算器计算
+                    calculator = CarbonCalculator()
+                    df_with_emissions = calculator.calculate_direct_emissions(df)
+                    df_with_emissions = calculator.calculate_indirect_emissions(df_with_emissions)
+                    df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
+                    df[target_column] = df_with_emissions[target_column]
+                else:
+                    # 对于其他特征，使用0填充（但尽量避免这种情况）
+                    df[col] = 0.0
+            elif df[col].isnull().any():
+                # 对存在的列但有缺失值的情况进行插值
+                df[col] = df[col].interpolate(method='linear').fillna(method='bfill').fillna(method='ffill')
 
         # 单独缩放每个特征
         scaled_features = {}
         for col in self.feature_columns + [target_column]:
-            if col not in df.columns:
-                # 如果缺少某些列，使用0填充
-                df[col] = 0.0
-
             self.feature_scalers[col] = MinMaxScaler()
-            scaled_features[col] = self.feature_scalers[col].fit_transform(df[[col]])
+            scaled_data = self.feature_scalers[col].fit_transform(df[[col]])
+            scaled_features[col] = scaled_data.flatten()  # 确保是一维数组
 
-        # 创建序列数据
+        # 创建序列数据 - 确保所有特征长度一致
         X, y = [], []
-        for i in range(self.sequence_length, len(df) - self.forecast_days):
-            # 特征序列
+        valid_indices = range(self.sequence_length, len(df) - self.forecast_days)
+
+        for i in valid_indices:
+            # 特征序列 - 确保所有特征长度一致
             seq_features = []
             for col in self.feature_columns:
-                seq_features.append(scaled_features[col][i - self.sequence_length:i])
+                feature_seq = scaled_features[col][i - self.sequence_length:i]
+                seq_features.append(feature_seq)
+
+            # 检查所有特征序列长度是否一致
+            seq_lengths = [len(seq) for seq in seq_features]
+            if len(set(seq_lengths)) != 1:
+                # 如果长度不一致，进行截断或填充
+                min_length = min(seq_lengths)
+                seq_features = [seq[:min_length] for seq in seq_features]
 
             # 目标值（未来forecast_d天的平均值）
             target_values = scaled_features[target_column][i:i + self.forecast_days]
-            seq_target = np.mean(target_values)
+            if len(target_values) == self.forecast_days:  # 确保有足够的目标值
+                seq_target = np.mean(target_values)
+                X.append(np.column_stack(seq_features))  # 使用column_stack确保形状正确
+                y.append(seq_target)
 
-            X.append(np.hstack(seq_features))
-            y.append(seq_target)
+        # 转换为numpy数组前检查是否为空
+        if len(X) == 0:
+            raise ValueError("没有足够的数据创建训练序列")
 
         return np.array(X), np.array(y)
 
@@ -254,58 +283,90 @@ class CarbonLSTMPredictor:
                 self.model = self.build_model((self.sequence_length, len(self.feature_columns)))
                 self.model.compile(optimizer='adam', loss='mse', metrics=['mae'])
 
-    def predict(self, df, target_column='total_CO2eq'):
-        steps = 7
-        """使用最近的数据进行多步预测"""
+    def predict(self, df, target_column='total_CO2eq', steps=7):
+        """科学的多步预测方法"""
         if self.model is None:
             raise ValueError("模型未加载，请先加载或训练模型")
 
         # 获取最近sequence_length天的数据
         recent_data = df.tail(self.sequence_length).copy()
 
-        # 确保所有需要的列都存在
+        # 确保所有需要的列都存在且有值
         for col in self.feature_columns:
-            if col not in recent_data.columns:
-                recent_data[col] = 0.0
+            if col not in recent_data.columns or recent_data[col].isnull().any():
+                # 使用历史平均值或最后有效值填充
+                if col in df.columns and not df[col].isnull().all():
+                    avg_value = df[col].mean()
+                    recent_data[col] = recent_data.get(col, avg_value).fillna(avg_value)
+                else:
+                    recent_data[col] = 0.0
 
         # 初始化预测结果
         predictions = []
-
-        # 准备输入数据
         current_input = recent_data.copy()
 
+        # 对于多步预测，我们需要预测未来每个时间步的所有特征
         for step in range(steps):
-            # 缩放特征
-            scaled_features = []
-            for col in self.feature_columns:
-                if col in self.feature_scalers:
-                    scaled_col = self.feature_scalers[col].transform(current_input[[col]].tail(self.sequence_length))
-                    scaled_features.append(scaled_col)
+            try:
+                # 准备当前输入数据
+                scaled_inputs = []
+                for col in self.feature_columns:
+                    if col in self.feature_scalers:
+                        # 使用最近sequence_length天的数据
+                        col_data = current_input[col].values[-self.sequence_length:]
+                        scaled_data = self.feature_scalers[col].transform(col_data.reshape(-1, 1))
+                        scaled_inputs.append(scaled_data.flatten())
+                    else:
+                        # 如果没有缩放器，使用原始数据
+                        scaled_inputs.append(current_input[col].values[-self.sequence_length:])
+
+                # 创建输入序列
+                X_input = np.column_stack(scaled_inputs)
+                X_input = X_input.reshape(1, X_input.shape[0], X_input.shape[1])
+
+                # 进行预测
+                scaled_prediction = self.model.predict(X_input, verbose=0)[0][0]
+
+                # 反缩放预测结果
+                prediction = self.feature_scalers[target_column].inverse_transform(
+                    [[scaled_prediction]]
+                )[0][0]
+
+                predictions.append(prediction)
+
+                # 科学地更新输入数据：创建新的数据行，包含所有特征的预测值
+                new_row = current_input.iloc[-1:].copy()
+
+                # 更新目标列
+                new_row[target_column] = prediction
+
+                # 对于其他特征，使用趋势外推或保持最后值（更科学的方法）
+                # 这里可以使用简单的移动平均或趋势预测
+                for col in self.feature_columns:
+                    if col != target_column:
+                        # 使用最近几天的趋势来预测下一个值
+                        last_values = current_input[col].tail(5).values
+                        if len(last_values) >= 2:
+                            # 简单线性外推
+                            trend = np.polyfit(range(len(last_values)), last_values, 1)
+                            next_value = np.polyval(trend, len(last_values))
+                            new_row[col] = max(0, next_value)  # 确保非负
+                        else:
+                            new_row[col] = last_values[-1] if len(last_values) > 0 else current_input[col].mean()
+
+                # 更新日期（假设每天一条数据）
+                new_row['日期'] = current_input['日期'].max() + pd.Timedelta(days=1)
+
+                # 添加到输入数据中
+                current_input = pd.concat([current_input, new_row]).tail(self.sequence_length)
+
+            except Exception as e:
+                logger.error(f"第{step + 1}步预测失败: {str(e)}")
+                # 如果某步预测失败，使用最后有效预测值
+                if predictions:
+                    predictions.append(predictions[-1])
                 else:
-                    # 如果缺少某些缩放器，使用默认值
-                    default_value = np.zeros((self.sequence_length, 1))
-                    scaled_features.append(default_value)
-
-            # 准备输入数据
-            X_input = np.hstack(scaled_features)
-            X_input = X_input.reshape(1, X_input.shape[0], X_input.shape[1])
-
-            # 进行预测
-            scaled_prediction = self.model.predict(X_input, verbose=0)[0][0]
-
-            # 反缩放预测结果
-            prediction = self.feature_scalers[target_column].inverse_transform(
-                [[scaled_prediction]]
-            )[0][0]
-
-            predictions.append(prediction)
-
-            # 更新输入数据（将预测值添加到特征中用于下一步预测）
-            # 这里简化处理，实际应用中可能需要更复杂的数据更新逻辑
-            new_row = current_input.iloc[-1:].copy()
-            new_row[target_column] = prediction
-            # 可以更新其他相关特征（如日期等）
-            current_input = pd.concat([current_input, new_row]).tail(self.sequence_length)
+                    predictions.append(current_input[target_column].mean())
 
         return predictions
 
