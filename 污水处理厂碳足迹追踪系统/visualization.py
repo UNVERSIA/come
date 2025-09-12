@@ -225,38 +225,31 @@ def create_carbon_trend_chart(historical_data, predicted_data=None):
     fig.update_layout(
         title="碳排放趋势与预测",
         title_font=dict(size=24, family="Arial", color="black"),
-        xaxis_title="日期",
-        yaxis_title="碳排放 (kgCO2eq)",
+        xaxis_title="日期", yaxis_title="碳排放 (kgCO2eq)",
         font=dict(size=14, color="black"),
         plot_bgcolor="rgba(245, 245, 245, 1)",
         paper_bgcolor="rgba(245, 245, 245, 1)",
-        height=500,
-        # 使用全宽布局
+        # 移除固定宽度设置，使用自动调整
+        width=None,
         autosize=True,
-        width=None,  # 让图表自动填充可用空间
-        margin=dict(l=60, r=60, b=80, t=80, pad=10),  # 增加边距，确保内容不被裁剪
+        margin=dict(l=50, r=50, b=80, t=100, pad=10),
         xaxis=dict(
-            tickfont=dict(color="black", size=10),
-            title_font=dict(color="black", size=12),
+            tickfont=dict(color="black"),
+            title_font=dict(color="black"),
             tickangle=-45,
             tickformat="%m-%d",
             # 确保x轴标签不会重叠
             tickmode='auto',
-            nticks=min(15, len(historical_data)),  # 动态设置刻度数量
-            automargin=True,  # 自动调整边距
-            showgrid=True
+            nticks=20  # 设置最大刻度数
         ),
         yaxis=dict(
-            tickfont=dict(color="black", size=10),
-            title_font=dict(color="black", size=12),
-            automargin=True,  # 自动调整边距
-            showgrid=True
+            tickfont=dict(color="black"),
+            title_font=dict(color="black")
         ),
         legend=dict(
             x=0.02,
             y=0.98,
-            bgcolor='rgba(255, 255, 255, 0.7)',
-            font=dict(size=10)
+            bgcolor='rgba(255, 255, 255, 0.5)'
         )
     )
 
