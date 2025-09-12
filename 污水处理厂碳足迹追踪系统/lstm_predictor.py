@@ -284,7 +284,7 @@ class CarbonLSTMPredictor:
                 self.model.compile(optimizer='adam', loss='mse', metrics=['mae'])
 
     def predict(self, df, target_column='total_CO2eq', steps=7):
-        """科学的多步预测方法"""
+        """科学的多步预测方法 - 修复版本"""
         if self.model is None:
             raise ValueError("模型未加载，请先加载或训练模型")
 
@@ -303,22 +303,18 @@ class CarbonLSTMPredictor:
 
         # 初始化预测结果
         predictions = []
-        current_input = recent_data.copy()
+        current_sequence = recent_data.copy()
 
-        # 对于多步预测，我们需要预测未来每个时间步的所有特征
         for step in range(steps):
             try:
-                # 准备当前输入数据
+                # 准备当前输入数据 - 只使用特征列
                 scaled_inputs = []
                 for col in self.feature_columns:
                     if col in self.feature_scalers:
                         # 使用最近sequence_length天的数据
-                        col_data = current_input[col].values[-self.sequence_length:]
+                        col_data = current_sequence[col].values[-self.sequence_length:]
                         scaled_data = self.feature_scalers[col].transform(col_data.reshape(-1, 1))
                         scaled_inputs.append(scaled_data.flatten())
-                    else:
-                        # 如果没有缩放器，使用原始数据
-                        scaled_inputs.append(current_input[col].values[-self.sequence_length:])
 
                 # 创建输入序列
                 X_input = np.column_stack(scaled_inputs)
@@ -334,39 +330,40 @@ class CarbonLSTMPredictor:
 
                 predictions.append(prediction)
 
-                # 科学地更新输入数据：创建新的数据行，包含所有特征的预测值
-                new_row = current_input.iloc[-1:].copy()
+                # 创建新的数据行 - 更科学的方法
+                new_row = current_sequence.iloc[-1:].copy()
 
                 # 更新目标列
                 new_row[target_column] = prediction
 
-                # 对于其他特征，使用趋势外推或保持最后值（更科学的方法）
-                # 这里可以使用简单的移动平均或趋势预测
+                # 对于其他特征，使用更合理的预测方法
+                # 这里使用简单的移动平均或趋势外推
                 for col in self.feature_columns:
                     if col != target_column:
-                        # 使用最近几天的趋势来预测下一个值
-                        last_values = current_input[col].tail(5).values
-                        if len(last_values) >= 2:
-                            # 简单线性外推
-                            trend = np.polyfit(range(len(last_values)), last_values, 1)
-                            next_value = np.polyval(trend, len(last_values))
-                            new_row[col] = max(0, next_value)  # 确保非负
+                        # 使用最近3天的移动平均
+                        last_values = current_sequence[col].tail(3).values
+                        if len(last_values) > 0:
+                            new_row[col] = np.mean(last_values)
                         else:
-                            new_row[col] = last_values[-1] if len(last_values) > 0 else current_input[col].mean()
+                            new_row[col] = current_sequence[col].mean()
 
-                # 更新日期（假设每天一条数据）
-                new_row['日期'] = current_input['日期'].max() + pd.Timedelta(days=1)
+                # 更新日期
+                last_date = current_sequence['日期'].max()
+                new_row['日期'] = last_date + pd.Timedelta(days=1)
 
-                # 添加到输入数据中
-                current_input = pd.concat([current_input, new_row]).tail(self.sequence_length)
+                # 添加到序列中，保持序列长度不变
+                current_sequence = pd.concat([current_sequence, new_row])
+                current_sequence = current_sequence.tail(self.sequence_length)
 
             except Exception as e:
                 logger.error(f"第{step + 1}步预测失败: {str(e)}")
-                # 如果某步预测失败，使用最后有效预测值
+                # 使用最后有效预测值或历史平均值
                 if predictions:
                     predictions.append(predictions[-1])
                 else:
-                    predictions.append(current_input[target_column].mean())
+                    # 计算历史平均值作为回退
+                    hist_avg = df[target_column].mean() if target_column in df else 0
+                    predictions.append(hist_avg)
 
         return predictions
 
