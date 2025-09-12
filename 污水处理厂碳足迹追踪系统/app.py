@@ -1601,9 +1601,12 @@ with tab5:
 
     # 显示预测结果（占据整个宽度）
     if st.session_state.get('prediction_made', False):
-        # 显示预测图表
-        fig = vis.create_carbon_trend_chart(st.session_state.historical_data, st.session_state.prediction_data)
-        st.plotly_chart(fig, use_container_width=True)
+        # 显示预测图表 - 添加空数据检查
+        if st.session_state.historical_data is not None and not st.session_state.historical_data.empty:
+            fig = vis.create_carbon_trend_chart(st.session_state.historical_data, st.session_state.prediction_data)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("没有足够的历史数据来显示图表")
 
         # 显示预测数值
         st.subheader("预测结果详情")
