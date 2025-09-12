@@ -239,6 +239,8 @@ def initialize_session_state():
             '碳减排贡献率_%': [25, 15, 20, 12, 8],
             '能源中和率_%': [30, 40, 10, 15, 5]
         })
+    if 'prediction_made' not in st.session_state:
+        st.session_state.prediction_made = False
 
 
 # 初始化session state
@@ -1429,11 +1431,7 @@ with tab5:
             with st.spinner("正在加载预训练模型..."):
                 try:
                     # 检查模型文件是否存在
-                    model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "carbon_lstm.keras")
-                    # 添加路径调试信息
-                    # st.write(f"当前工作目录: {os.getcwd()}")
-                    # st.write(f"模型路径: {model_path}")
-                    # st.write(f"模型文件存在: {os.path.exists(model_path)}")
+                    model_path = "models/carbon_lstm.keras"
 
                     # 尝试多个可能的模型路径
                     possible_paths = [
@@ -1481,15 +1479,11 @@ with tab5:
             with st.spinner("正在训练新模型，这可能需要较长时间..."):
                 try:
                     if st.session_state.df is not None:
-                        # 优先使用已计算的数据
-                        if st.session_state.df_calc is not None:
-                            df_with_emissions = st.session_state.df_calc
-                        else:
-                            # 计算碳排放数据
-                            calculator = CarbonCalculator()
-                            df_with_emissions = calculator.calculate_direct_emissions(st.session_state.df)
-                            df_with_emissions = calculator.calculate_indirect_emissions(df_with_emissions)
-                            df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
+                        # 计算碳排放数据
+                        calculator = CarbonCalculator()
+                        df_with_emissions = calculator.calculate_direct_emissions(st.session_state.df)
+                        df_with_emissions = calculator.calculate_indirect_emissions(df_with_emissions)
+                        df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
 
                         # 训练模型
                         predictor = CarbonLSTMPredictor()
@@ -1517,13 +1511,11 @@ with tab5:
 
     # 第三部分：进行预测
     st.subheader("3. 预测设置")
-    predict_col1, predict_col2, predict_col3 = st.columns([2, 1, 3])
+    predict_col1, predict_col2, predict_col3 = st.columns([1, 1, 2])
     with predict_col1:
         prediction_days = st.slider("预测天数", 7, 30, 7, key="prediction_days")
 
     with predict_col2:
-        st.write("")
-        st.write("")
         if st.button("进行预测", key="predict_btn"):
             if st.session_state.lstm_predictor is not None:
                 with st.spinner("正在进行预测..."):
@@ -1536,19 +1528,7 @@ with tab5:
                             df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
 
                             # 进行预测
-                            if 'total_CO2eq' not in df_with_emissions.columns:
-                                st.error("数据中缺少'total_CO2eq'列，请检查数据格式")
-                                # 尝试重新计算碳排放
-                                df_with_emissions = calculator.calculate_unit_emissions(
-                                    calculator.calculate_indirect_emissions(
-                                        calculator.calculate_direct_emissions(df_with_emissions)
-                                    )
-                                )
-
-                            if 'total_CO2eq' in df_with_emissions.columns:
-                                prediction = st.session_state.lstm_predictor.predict(df_with_emissions)
-                            else:
-                                st.error("无法计算碳排放数据，请检查输入数据")
+                            prediction = st.session_state.lstm_predictor.predict(df_with_emissions)
 
                             # 生成预测结果
                             last_date = df_with_emissions['日期'].max()
@@ -1562,56 +1542,11 @@ with tab5:
                                 'upper_bound': [prediction * 1.1] * prediction_days
                             })
 
-                            # 显示预测图表
-                            historical_data = df_with_emissions[['日期', 'total_CO2eq']].tail(30)
-                            st.markdown("<br><br>", unsafe_allow_html=True)  # 添加两行空白
-                            fig = vis.create_carbon_trend_chart(historical_data, prediction_data)
-                            st.plotly_chart(fig, use_container_width=True)
-
-                            # 显示预测数值
-                            # 显示预测数值
-                            st.subheader("预测结果详情")
-                            if not prediction_data.empty:
-                                # 使用全宽容器显示表格
-                                with st.container():
-                                    # 格式化显示预测数据
-                                    display_df = prediction_data.copy()
-                                    display_df['日期'] = display_df['日期'].dt.strftime('%Y-%m-%d')
-                                    display_df.rename(columns={
-                                        'predicted_CO2eq': '预测碳排放(kgCO2eq)',
-                                        'lower_bound': '预测下限(kgCO2eq)',
-                                        'upper_bound': '预测上限(kgCO2eq)'
-                                    }, inplace=True)
-
-                                    # 设置更友好的显示格式
-                                    for col in ['预测碳排放(kgCO2eq)', '预测下限(kgCO2eq)', '预测上限(kgCO2eq)']:
-                                        display_df[col] = display_df[col].round(1)
-
-                                    # 使用全宽显示表格
-                                    st.dataframe(display_df, use_container_width=True, height=300)  # 使用全宽
-
-                                # 计算并显示变化趋势
-                                current_avg = historical_data['total_CO2eq'].mean()
-                                change = ((prediction - current_avg) / current_avg * 100) if current_avg > 0 else 0
-
-                                # 确保变化趋势有值
-                                if abs(change) < 0.1:  # 如果变化很小，可能是计算错误
-                                    # 使用最近几天的趋势进行估算
-                                    recent_trend = historical_data['total_CO2eq'].pct_change().mean() * 100
-                                    if not np.isnan(recent_trend):
-                                        change = recent_trend
-
-                                # 使用columns来布局指标
-                                col1, col2, col3 = st.columns(3)
-                                with col1:
-                                    st.metric("平均预测值", f"{prediction:.1f} kgCO2eq/天")
-                                with col2:
-                                    st.metric("预测区间", f"{prediction * 0.9:.1f} - {prediction * 1.1:.1f} kgCO2eq/天")
-                                with col3:
-                                    st.metric("变化趋势", f"{change:+.1f}%",
-                                              delta_color="inverse" if change > 0 else "normal")
-                            else:
-                                st.warning("没有预测数据可显示")
+                            # 保存预测结果到session_state
+                            st.session_state.prediction_data = prediction_data
+                            st.session_state.historical_data = df_with_emissions[['日期', 'total_CO2eq']].tail(30)
+                            st.session_state.prediction = prediction
+                            st.session_state.prediction_made = True
 
                         else:
                             st.warning("请先上传数据")
@@ -1622,6 +1557,55 @@ with tab5:
 
     with predict_col3:
         st.info("使用当前模型对未来碳排放进行预测。可以调整预测天数，结果将显示预测图表和关键指标。")
+
+    # 显示预测结果（占据整个宽度）
+    if st.session_state.get('prediction_made', False):
+        # 显示预测图表
+        fig = vis.create_carbon_trend_chart(st.session_state.historical_data, st.session_state.prediction_data)
+        st.plotly_chart(fig, use_container_width=True)
+
+        # 显示预测数值
+        st.subheader("预测结果详情")
+        if not st.session_state.prediction_data.empty:
+            # 格式化显示预测数据
+            display_df = st.session_state.prediction_data.copy()
+            display_df['日期'] = display_df['日期'].dt.strftime('%Y-%m-%d')
+            display_df.rename(columns={
+                'predicted_CO2eq': '预测碳排放(kgCO2eq)',
+                'lower_bound': '预测下限(kgCO2eq)',
+                'upper_bound': '预测上限(kgCO2eq)'
+            }, inplace=True)
+
+            # 设置更友好的显示格式
+            for col in ['预测碳排放(kgCO2eq)', '预测下限(kgCO2eq)', '预测上限(kgCO2eq)']:
+                display_df[col] = display_df[col].round(1)
+
+            # 使用全宽显示表格
+            st.dataframe(display_df, use_container_width=True)
+
+            # 计算并显示变化趋势
+            current_avg = st.session_state.historical_data['total_CO2eq'].mean()
+            change = ((st.session_state.prediction - current_avg) / current_avg * 100) if current_avg > 0 else 0
+
+            # 确保变化趋势有值
+            if abs(change) < 0.1:  # 如果变化很小，可能是计算错误
+                # 使用最近几天的趋势进行估算
+                recent_trend = st.session_state.historical_data['total_CO2eq'].pct_change().mean() * 100
+                if not np.isnan(recent_trend):
+                    change = recent_trend
+
+            # 使用columns来布局指标
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("平均预测值", f"{st.session_state.prediction:.1f} kgCO2eq/天")
+            with col2:
+                st.metric("预测区间",
+                          f"{st.session_state.prediction * 0.9:.1f} - {st.session_state.prediction * 1.1:.1f} kgCO2eq/天")
+            with col3:
+                st.metric("变化趋势", f"{change:+.1f}%",
+                          delta_color="inverse" if change > 0 else "normal")
+        else:
+            st.warning("没有预测数据可显示")
 
     # 显示模型状态
     st.subheader("模型状态")
@@ -1659,10 +1643,9 @@ with tab5:
 
                 historical_data = df_with_emissions[['日期', 'total_CO2eq']].tail(30)
                 fig = vis.create_carbon_trend_chart(historical_data, simple_prediction)
-                st.plotly_chart(fig, use_container_width=True, height=400)
+                st.plotly_chart(fig, use_container_width=True)
 
                 st.info("这是基于历史平均值的简单预测，精度较低")
-
 # 新增选项卡：减排技术分析
 with tab6:
     st.header("碳减排技术对比分析")
