@@ -242,6 +242,13 @@ def initialize_session_state():
     if 'prediction_made' not in st.session_state:
         st.session_state.prediction_made = False
 
+    if 'historical_data' not in st.session_state:
+        st.session_state.historical_data = pd.DataFrame()
+    if 'prediction_data' not in st.session_state:
+        st.session_state.prediction_data = pd.DataFrame()
+    if 'prediction_made' not in st.session_state:
+        st.session_state.prediction_made = False
+
 
 # 初始化session state
 initialize_session_state()
@@ -1517,6 +1524,7 @@ with tab5:
         prediction_days = st.slider("预测天数", 30, 365, 90, key="prediction_days") # 30-365天，默认90天
 
     with predict_col2:
+        # 替换预测按钮点击事件的处理代码
         if st.button("进行预测", key="predict_btn"):
             if st.session_state.lstm_predictor is not None:
                 with st.spinner("正在进行预测，这可能需要几分钟..."):
@@ -1529,70 +1537,42 @@ with tab5:
                             df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
 
                             # 进行预测
-                            recent_data = df_with_emissions.tail(90)  # 使用最近30天数据
-                            try:
-                                # 使用科学的多步预测
-                                prediction_values = st.session_state.lstm_predictor.predict(
-                                    recent_data, 'total_CO2eq', steps=prediction_days
-                                )
+                            recent_data = df_with_emissions.tail(90)  # 使用最近90天数据
 
-                                # 生成预测结果 - 确保日期正确
-                                last_date = df_with_emissions['日期'].max()
-                                future_dates = [last_date + timedelta(days=i) for i in range(1, prediction_days + 1)]
+                            # 确保使用正确的预测方法
+                            prediction_df = st.session_state.lstm_predictor.predict(
+                                recent_data, 'total_CO2eq', steps=prediction_days
+                            )
 
-                                # 确保预测值与日期数量匹配
-                                if len(prediction_values) != len(future_dates):
-                                    # 如果预测值多于日期，截断
-                                    if len(prediction_values) > len(future_dates):
-                                        prediction_values = prediction_values[:len(future_dates)]
-                                    # 如果预测值少于日期，使用趋势外推而不是简单填充
-                                    else:
-                                        # 计算最近几天的趋势
-                                        if len(prediction_values) >= 2:
-                                            trend = prediction_values[-1] - prediction_values[-2]
-                                            # 基于趋势外推剩余天数
-                                            for i in range(len(future_dates) - len(prediction_values)):
-                                                next_value = prediction_values[-1] + trend * (i + 1)
-                                                # 添加一些随机性
-                                                next_value = next_value * (1 + np.random.normal(0, 0.02))
-                                                prediction_values.append(max(0, next_value))
-                                        else:
-                                            # 如果没有足够数据，使用平均值
-                                            avg_value = np.mean(prediction_values) if prediction_values else 0
-                                            for i in range(len(future_dates) - len(prediction_values)):
-                                                prediction_values.append(avg_value)
-
-                                # 创建预测数据 - 添加置信区间
-                                mean_prediction = np.mean(prediction_values) if prediction_values else 0
-                                std_prediction = np.std(prediction_values) if len(
-                                    prediction_values) > 1 else mean_prediction * 0.1
-
-                                prediction_data = pd.DataFrame({
-                                    '日期': future_dates,
-                                    'predicted_CO2eq': prediction_values,
-                                    'lower_bound': [max(0, p - std_prediction) for p in prediction_values],
-                                    'upper_bound': [p + std_prediction for p in prediction_values]
+                            # 确保预测结果是DataFrame
+                            if isinstance(prediction_df, pd.DataFrame):
+                                st.session_state.prediction_data = prediction_df
+                            else:
+                                # 如果返回的不是DataFrame，转换为DataFrame
+                                st.session_state.prediction_data = pd.DataFrame({
+                                    '日期': [datetime.now() + timedelta(days=i) for i in range(1, prediction_days + 1)],
+                                    'predicted_CO2eq': [prediction_df] * prediction_days if isinstance(prediction_df,
+                                                                                                       (int,
+                                                                                                        float)) else [0] * prediction_days
                                 })
 
-                                # 保存预测结果到session_state
-                                st.session_state.prediction_data = prediction_data
-                                st.session_state.historical_data = df_with_emissions[['日期', 'total_CO2eq']].tail(30)
-                                st.session_state.prediction = mean_prediction
-                                st.session_state.prediction_made = True
+                            # 设置历史数据
+                            st.session_state.historical_data = df_with_emissions[['日期', 'total_CO2eq']].tail(30)
+                            st.session_state.prediction = st.session_state.prediction_data['predicted_CO2eq'].mean()
+                            st.session_state.prediction_made = True
 
-                            except Exception as e:
-                                st.error(f"预测失败: {str(e)}")
-                                #  fallback到简单预测
-                                calculator = CarbonCalculator()
-                                simple_prediction = calculator._simple_emission_prediction(df_with_emissions,
-                                                                                           prediction_days)
-                                st.session_state.prediction_data = simple_prediction
-                                st.session_state.prediction_made = True
-
-                        else:
-                            st.warning("请先上传数据")
                     except Exception as e:
                         st.error(f"预测失败: {str(e)}")
+                        # 使用简单预测作为备选
+                        try:
+                            calculator = CarbonCalculator()
+                            simple_prediction = calculator._simple_emission_prediction(
+                                st.session_state.df, prediction_days
+                            )
+                            st.session_state.prediction_data = simple_prediction
+                            st.session_state.prediction_made = True
+                        except Exception as fallback_error:
+                            st.error(f"简单预测也失败: {str(fallback_error)}")
             else:
                 st.warning("请先加载或训练模型")
 
@@ -1600,13 +1580,15 @@ with tab5:
         st.info("使用当前模型对未来碳排放进行预测。可以调整预测天数，结果将显示预测图表和关键指标。")
 
     # 显示预测结果（占据整个宽度）
-    if st.session_state.get('prediction_made', False):
-        # 显示预测图表 - 添加空数据检查
-        if st.session_state.historical_data is not None and not st.session_state.historical_data.empty:
+        if (st.session_state.get('prediction_made', False) and
+                not st.session_state.historical_data.empty and
+                not st.session_state.prediction_data.empty):
+
+            # 显示预测图表
             fig = vis.create_carbon_trend_chart(st.session_state.historical_data, st.session_state.prediction_data)
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.warning("没有足够的历史数据来显示图表")
+            st.warning("没有足够的数据进行预测或预测未完成")
 
         # 显示预测数值
         st.subheader("预测结果详情")
