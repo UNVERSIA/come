@@ -231,8 +231,9 @@ def create_carbon_trend_chart(historical_data, predicted_data=None):
         paper_bgcolor="rgba(245, 245, 245, 1)",
         height=500,
         # 移除固定宽度设置，使用自动调整
+        width=None,
         autosize=True,
-        margin=dict(l=20, r=50, b=100, t=100, pad=4),
+        margin=dict(l=50, r=50, b=80, t=100, pad=10),
         xaxis=dict(
             tickfont=dict(color="black"),
             title_font=dict(color="black"),
