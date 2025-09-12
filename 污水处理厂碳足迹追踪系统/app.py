@@ -1541,12 +1541,25 @@ with tab5:
 
                                 # 确保预测值与日期数量匹配
                                 if len(prediction_values) != len(future_dates):
-                                    # 如果数量不匹配，进行截断或填充
-                                    prediction_values = prediction_values[:len(future_dates)]
-                                    if len(prediction_values) < len(future_dates):
-                                        # 使用最后一个预测值填充
-                                        prediction_values.extend(
-                                            [prediction_values[-1]] * (len(future_dates) - len(prediction_values)))
+                                    # 如果预测值多于日期，截断
+                                    if len(prediction_values) > len(future_dates):
+                                        prediction_values = prediction_values[:len(future_dates)]
+                                    # 如果预测值少于日期，使用趋势外推而不是简单填充
+                                    else:
+                                        # 计算最近几天的趋势
+                                        if len(prediction_values) >= 2:
+                                            trend = prediction_values[-1] - prediction_values[-2]
+                                            # 基于趋势外推剩余天数
+                                            for i in range(len(future_dates) - len(prediction_values)):
+                                                next_value = prediction_values[-1] + trend * (i + 1)
+                                                # 添加一些随机性
+                                                next_value = next_value * (1 + np.random.normal(0, 0.02))
+                                                prediction_values.append(max(0, next_value))
+                                        else:
+                                            # 如果没有足够数据，使用平均值
+                                            avg_value = np.mean(prediction_values) if prediction_values else 0
+                                            for i in range(len(future_dates) - len(prediction_values)):
+                                                prediction_values.append(avg_value)
 
                                 # 创建预测数据 - 添加置信区间
                                 mean_prediction = np.mean(prediction_values) if prediction_values else 0
