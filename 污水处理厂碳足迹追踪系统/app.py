@@ -1431,7 +1431,7 @@ with tab5:
             with st.spinner("正在加载预训练模型..."):
                 try:
                     # 检查模型文件是否存在
-                    model_path = "models/carbon_lstm.keras"
+                    model_path = "./污水处理厂碳足迹追踪系统/models/carbon_lstm.keras"
 
                     # 尝试多个可能的模型路径
                     possible_paths = [
@@ -1528,7 +1528,11 @@ with tab5:
                             df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
 
                             # 进行预测
-                            prediction = st.session_state.lstm_predictor.predict(df_with_emissions,'total_CO2eq',steps=prediction_days)
+                            recent_data = df_with_emissions.tail(30)  # 使用最近30天数据
+                            prediction = st.session_state.lstm_predictor.predict(recent_data, 'total_CO2eq')
+                            # 如果预测返回的是多个值，只取第一个
+                            if isinstance(prediction, list) and len(prediction) > 0:
+                                prediction = prediction[0]
 
                             # 生成预测结果
                             last_date = df_with_emissions['日期'].max()
