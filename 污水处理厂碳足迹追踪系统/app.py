@@ -1525,43 +1525,41 @@ with tab5:
 
     with predict_col2:
         # 替换预测按钮点击事件的处理代码
+        # ... （在tab5的预测按钮点击事件中）
         if st.button("进行预测", key="predict_btn"):
             if st.session_state.lstm_predictor is not None:
                 with st.spinner("正在进行预测，这可能需要几分钟..."):
                     try:
                         if st.session_state.df is not None:
-                            # 计算碳排放数据
-                            calculator = CarbonCalculator()
-                            df_with_emissions = calculator.calculate_direct_emissions(st.session_state.df)
-                            df_with_emissions = calculator.calculate_indirect_emissions(df_with_emissions)
-                            df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
+                            # 使用完整的、多年的历史数据 (st.session_state.df) 进行预测！
+                            historical_data_full = st.session_state.df.copy()
 
-                            # 确保使用正确的预测方法
+                            # 确保日期列是datetime类型且排序
+                            historical_data_full['日期'] = pd.to_datetime(historical_data_full['日期'])
+                            historical_data_full = historical_data_full.sort_values('日期').reset_index(drop=True)
+
+                            # 计算碳排放（如果尚未计算）
+                            if 'total_CO2eq' not in historical_data_full.columns:
+                                calculator = CarbonCalculator()
+                                historical_data_full = calculator.calculate_direct_emissions(historical_data_full)
+                                historical_data_full = calculator.calculate_indirect_emissions(historical_data_full)
+                                historical_data_full = calculator.calculate_unit_emissions(historical_data_full)
+
+                            # 进行预测 - 预测未来365天
                             prediction_df = st.session_state.lstm_predictor.predict(
-                                df_with_emissions,'total_CO2eq', steps=prediction_days
+                                historical_data_full,  # 传入完整历史数据
+                                'total_CO2eq',
+                                steps=365  # 预测未来一年
                             )
 
+                            # 存储结果
                             st.session_state.prediction_data = prediction_df
-
-                            # 确保预测结果是DataFrame
-                            if isinstance(prediction_df, pd.DataFrame):
-                                st.session_state.prediction_data = prediction_df
-                            else:
-                                # 如果返回的不是DataFrame，转换为DataFrame
-                                st.session_state.prediction_data = pd.DataFrame({
-                                    '日期': [datetime.now() + timedelta(days=i) for i in range(1, prediction_days + 1)],
-                                    'predicted_CO2eq': [prediction_df] * prediction_days if isinstance(prediction_df,
-                                                                                                       (int,
-                                                                                                        float)) else [0] * prediction_days
-                                })
-
-                            # 设置历史数据
-                            st.session_state.historical_data = df_with_emissions[['日期', 'total_CO2eq']].tail(30)
-                            st.session_state.prediction = st.session_state.prediction_data['predicted_CO2eq'].mean()
+                            st.session_state.historical_data = historical_data_full  # 存储完整历史数据用于绘图
                             st.session_state.prediction_made = True
 
                     except Exception as e:
                         st.error(f"预测失败: {str(e)}")
+                        # ... 错误处理 ...
                         # 使用简单预测作为备选
                         try:
                             calculator = CarbonCalculator()
@@ -1579,13 +1577,77 @@ with tab5:
         st.info("使用当前模型对未来碳排放进行预测。可以调整预测天数，结果将显示预测图表和关键指标。")
 
     # 显示预测结果（占据整个宽度）
+        # 在tab5中替换预测结果显示部分
         if (st.session_state.get('prediction_made', False) and
                 not st.session_state.historical_data.empty and
                 not st.session_state.prediction_data.empty):
 
-            # 显示预测图表
-            fig = vis.create_carbon_trend_chart(st.session_state.historical_data, st.session_state.prediction_data)
-            st.plotly_chart(fig, use_container_width=True)
+            # 显示多个图表
+            tab1, tab2, tab3 = st.tabs(["历史趋势", "年度对比", "未来预测"])
+
+            with tab1:
+                # 显示历史年度趋势
+                yearly_fig = vis.create_historical_trend_chart(st.session_state.historical_data)
+                st.plotly_chart(yearly_fig, use_container_width=True)
+
+                # 显示最近一年的月度趋势
+                recent_year = st.session_state.historical_data['日期'].dt.year.max()
+                monthly_fig = vis.create_monthly_trend_chart(st.session_state.historical_data, recent_year)
+                st.plotly_chart(monthly_fig, use_container_width=True)
+
+            with tab2:
+                # 显示多年对比
+                st.subheader("多年碳排放对比")
+                years = st.multiselect(
+                    "选择对比年份",
+                    options=sorted(st.session_state.historical_data['日期'].dt.year.unique()),
+                    default=sorted(st.session_state.historical_data['日期'].dt.year.unique())[-3:]  # 默认最近3年
+                )
+
+                if years:
+                    comparison_data = st.session_state.historical_data[
+                        st.session_state.historical_data['日期'].dt.year.isin(years)
+                    ]
+
+                    # 创建月度对比图
+                    comparison_data['年月'] = comparison_data['日期'].dt.strftime('%Y-%m')
+                    monthly_comparison = comparison_data.groupby(['年月', '日期'].dt.year)[
+                        'total_CO2eq'].mean().reset_index()
+
+                    fig = px.line(monthly_comparison, x='年月', y='total_CO2eq', color='日期',
+                                  title="多年月度碳排放对比")
+                    fig.update_layout(
+                        xaxis_title="年月",
+                        yaxis_title="月均碳排放 (kgCO2eq)",
+                        height=500
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+            with tab3:
+                # 显示未来预测
+                forecast_fig = vis.create_forecast_chart(
+                    st.session_state.historical_data,
+                    st.session_state.prediction_data
+                )
+                st.plotly_chart(forecast_fig, use_container_width=True)
+
+                # 显示预测统计信息
+                st.subheader("预测统计信息")
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+                    avg_prediction = st.session_state.prediction_data['predicted_CO2eq'].mean()
+                    st.metric("预测期日均排放", f"{avg_prediction:.1f} kgCO2eq")
+
+                with col2:
+                    total_prediction = st.session_state.prediction_data['predicted_CO2eq'].sum()
+                    st.metric("预测期总排放", f"{total_prediction:.0f} kgCO2eq")
+
+                with col3:
+                    # 计算与历史同期的变化
+                    historical_avg = st.session_state.historical_data['total_CO2eq'].mean()
+                    change_percent = ((avg_prediction - historical_avg) / historical_avg) * 100
+                    st.metric("与历史同期相比", f"{change_percent:+.1f}%")
         else:
             st.warning("没有足够的数据进行预测或预测未完成")
 
