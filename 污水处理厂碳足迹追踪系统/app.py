@@ -1528,7 +1528,7 @@ with tab5:
                             df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
 
                             # 进行预测
-                            prediction = st.session_state.lstm_predictor.predict(df_with_emissions)
+                            prediction = st.session_state.lstm_predictor.predict(df_with_emissions,'total_CO2eq',steps=prediction_days)
 
                             # 生成预测结果
                             last_date = df_with_emissions['日期'].max()
@@ -1537,7 +1537,7 @@ with tab5:
                             # 创建预测数据
                             prediction_data = pd.DataFrame({
                                 '日期': future_dates,
-                                'predicted_CO2eq': [prediction] * prediction_days,
+                                'predicted_CO2eq': [prediction],
                                 'lower_bound': [prediction * 0.9] * prediction_days,
                                 'upper_bound': [prediction * 1.1] * prediction_days
                             })
