@@ -119,6 +119,17 @@ class CarbonLSTMPredictor:
 
     def load_model(self, model_path='models/carbon_lstm.keras'):
         """加载预训练模型"""
+        # 添加路径前缀
+        if not model_path.startswith('./污水处理厂碳足迹追踪系统/'):
+            model_path = f'./污水处理厂碳足迹追踪系统/{model_path}'
+
+        # 检查文件是否存在
+        if not os.path.exists(model_path):
+            # 尝试不带前缀的路径
+            alt_path = model_path.replace('./污水处理厂碳足迹追踪系统/', '')
+            if os.path.exists(alt_path):
+                model_path = alt_path
+
         # 检查模型文件是否存在
         if not os.path.exists(model_path):
             # 尝试加载.h5格式的旧模型（兼容性）
@@ -244,7 +255,8 @@ class CarbonLSTMPredictor:
                 self.model.compile(optimizer='adam', loss='mse', metrics=['mae'])
 
     def predict(self, df, target_column='total_CO2eq'):
-        """使用最近的数据进行预测"""
+        steps = 7
+        """使用最近的数据进行多步预测"""
         if self.model is None:
             raise ValueError("模型未加载，请先加载或训练模型")
 
@@ -256,30 +268,46 @@ class CarbonLSTMPredictor:
             if col not in recent_data.columns:
                 recent_data[col] = 0.0
 
-        # 缩放特征
-        scaled_features = []
-        for col in self.feature_columns:
-            if col in self.feature_scalers:
-                scaled_col = self.feature_scalers[col].transform(recent_data[[col]])
-                scaled_features.append(scaled_col)
-            else:
-                # 如果缺少某些缩放器，使用默认值
-                default_value = np.zeros((len(recent_data), 1))
-                scaled_features.append(default_value)
+        # 初始化预测结果
+        predictions = []
 
         # 准备输入数据
-        X_input = np.hstack(scaled_features)
-        X_input = X_input.reshape(1, X_input.shape[0], X_input.shape[1])
+        current_input = recent_data.copy()
 
-        # 进行预测
-        scaled_prediction = self.model.predict(X_input)[0][0]
+        for step in range(steps):
+            # 缩放特征
+            scaled_features = []
+            for col in self.feature_columns:
+                if col in self.feature_scalers:
+                    scaled_col = self.feature_scalers[col].transform(current_input[[col]].tail(self.sequence_length))
+                    scaled_features.append(scaled_col)
+                else:
+                    # 如果缺少某些缩放器，使用默认值
+                    default_value = np.zeros((self.sequence_length, 1))
+                    scaled_features.append(default_value)
 
-        # 反缩放预测结果
-        prediction = self.feature_scalers[target_column].inverse_transform(
-            [[scaled_prediction]]
-        )[0][0]
+            # 准备输入数据
+            X_input = np.hstack(scaled_features)
+            X_input = X_input.reshape(1, X_input.shape[0], X_input.shape[1])
 
-        return prediction
+            # 进行预测
+            scaled_prediction = self.model.predict(X_input, verbose=0)[0][0]
+
+            # 反缩放预测结果
+            prediction = self.feature_scalers[target_column].inverse_transform(
+                [[scaled_prediction]]
+            )[0][0]
+
+            predictions.append(prediction)
+
+            # 更新输入数据（将预测值添加到特征中用于下一步预测）
+            # 这里简化处理，实际应用中可能需要更复杂的数据更新逻辑
+            new_row = current_input.iloc[-1:].copy()
+            new_row[target_column] = prediction
+            # 可以更新其他相关特征（如日期等）
+            current_input = pd.concat([current_input, new_row]).tail(self.sequence_length)
+
+        return predictions
 
     def generate_future_dates(self, last_date, days=7):
         """生成未来日期序列"""
