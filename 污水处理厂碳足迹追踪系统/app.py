@@ -1512,13 +1512,14 @@ with tab5:
     # 第三部分：进行预测
     st.subheader("3. 预测设置")
     predict_col1, predict_col2, predict_col3 = st.columns([1, 1, 2])
+
     with predict_col1:
-        prediction_days = st.slider("预测天数", 7, 30, 7, key="prediction_days")
+        prediction_days = st.slider("预测天数", 30, 365, 90, key="prediction_days") # 30-365天，默认90天
 
     with predict_col2:
         if st.button("进行预测", key="predict_btn"):
             if st.session_state.lstm_predictor is not None:
-                with st.spinner("正在进行预测..."):
+                with st.spinner("正在进行预测，这可能需要几分钟..."):
                     try:
                         if st.session_state.df is not None:
                             # 计算碳排放数据
@@ -1528,7 +1529,7 @@ with tab5:
                             df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
 
                             # 进行预测
-                            recent_data = df_with_emissions.tail(30)  # 使用最近30天数据
+                            recent_data = df_with_emissions.tail(90)  # 使用最近30天数据
                             try:
                                 # 使用科学的多步预测
                                 prediction_values = st.session_state.lstm_predictor.predict(
