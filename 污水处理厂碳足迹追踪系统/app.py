@@ -1562,6 +1562,7 @@ with tab5:
 
                             # 显示预测图表
                             historical_data = df_with_emissions[['日期', 'total_CO2eq']].tail(30)
+                            st.markdown("<br><br>", unsafe_allow_html=True)  # 添加两行空白
                             fig = vis.create_carbon_trend_chart(historical_data, prediction_data)
                             st.plotly_chart(fig, use_container_width=True)
 
