@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 class DataSimulator:
     def __init__(self):
-        self.start_date = datetime(2020, 1, 1)
+        self.start_date = datetime(2018, 1, 1)
         self.end_date = datetime(2025, 6, 30)
 
     def generate_seasonal_pattern(self, length, amplitude, phase=0):
