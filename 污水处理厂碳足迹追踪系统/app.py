@@ -1431,9 +1431,9 @@ with tab5:
                     # 检查模型文件是否存在
                     model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "carbon_lstm.keras")
                     # 添加路径调试信息
-                    st.write(f"当前工作目录: {os.getcwd()}")
-                    st.write(f"模型路径: {model_path}")
-                    st.write(f"模型文件存在: {os.path.exists(model_path)}")
+                    # st.write(f"当前工作目录: {os.getcwd()}")
+                    # st.write(f"模型路径: {model_path}")
+                    # st.write(f"模型文件存在: {os.path.exists(model_path)}")
 
                     # 尝试多个可能的模型路径
                     possible_paths = [
