@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+from datetime import timedelta
 from factor_database import CarbonFactorDatabase
 
 
@@ -342,27 +343,53 @@ class CarbonCalculator:
             return self._simple_emission_prediction(df, future_days)
 
     def _simple_emission_prediction(self, df, future_days):
-        """简单线性预测（回退方法）"""
+        """改进的简单预测方法"""
         df_calc = self.calculate_direct_emissions(df)
         df_calc = self.calculate_indirect_emissions(df_calc)
         df_calc = self.calculate_unit_emissions(df_calc)
 
-        # 计算日均排放量
-        daily_avg = df_calc['total_CO2eq'].mean()
+        # 使用时间序列分析而不是简单平均
+        from statsmodels.tsa.holtwinters import ExponentialSmoothing
 
-        # 生成预测
-        predictions = []
+        # 准备时间序列数据
+        ts_data = df_calc.set_index('日期')['total_CO2eq']
+
+        try:
+            # 使用指数平滑进行预测
+            model = ExponentialSmoothing(ts_data, trend='add', seasonal='add', seasonal_periods=7)
+            fit = model.fit()
+            predictions = fit.forecast(future_days)
+
+            # 计算置信区间
+            stderr = fit.sse / len(ts_data)  # 简单估计标准误差
+            lower_bounds = predictions - 1.96 * stderr
+            upper_bounds = predictions + 1.96 * stderr
+
+        except:
+            # 回退到带趋势的线性预测
+            daily_avg = ts_data.mean()
+            trend = ts_data.pct_change().mean()  # 平均日变化率
+
+            predictions = []
+            for i in range(1, future_days + 1):
+                predicted = daily_avg * (1 + trend) ** i
+                predictions.append(max(0, predicted))
+
+            # 简单置信区间
+            std_dev = ts_data.std()
+            lower_bounds = [max(0, p - std_dev) for p in predictions]
+            upper_bounds = [p + std_dev for p in predictions]
+
+        # 生成预测结果
         last_date = df_calc['日期'].max()
+        future_dates = [last_date + timedelta(days=i) for i in range(1, future_days + 1)]
 
-        for i in range(1, future_days + 1):
-            predictions.append({
-                '日期': last_date + pd.Timedelta(days=i),
-                '预测碳排放': daily_avg,
-                '下限': daily_avg * 0.85,
-                '上限': daily_avg * 1.15
-            })
-
-        return pd.DataFrame(predictions)
+        return pd.DataFrame({
+            '日期': future_dates,
+            'predicted_CO2eq': predictions,
+            'lower_bound': lower_bounds,
+            'upper_bound': upper_bounds
+        })
 
     def generate_process_adjustments(self, df):
         """生成工艺调整建议"""
