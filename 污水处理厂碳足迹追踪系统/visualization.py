@@ -191,12 +191,15 @@ def create_carbon_trend_chart(historical_data, predicted_data=None):
 
     # 预测数据（如果有）
     if predicted_data is not None and not predicted_data.empty:
+        # 确保预测数据按日期排序（解决线条异常问题）
+        predicted_data = predicted_data.sort_values('日期')
+
         # 处理可能的列名差异
         pred_col = 'predicted_CO2eq' if 'predicted_CO2eq' in predicted_data.columns else '预测碳排放'
         lower_col = 'lower_bound' if 'lower_bound' in predicted_data.columns else '下限'
         upper_col = 'upper_bound' if 'upper_bound' in predicted_data.columns else '上限'
 
-        # 修正预测数据显示问题 - 确保预测数据正确绘制
+        # 修正预测数据显示问题
         fig.add_trace(go.Scatter(
             x=predicted_data['日期'], y=predicted_data[pred_col],
             mode='lines+markers', name='预测碳排放',
@@ -218,6 +221,7 @@ def create_carbon_trend_chart(historical_data, predicted_data=None):
                 name='预测下限'
             ))
 
+    # 使用更灵活的布局设置
     fig.update_layout(
         title="碳排放趋势与预测",
         title_font=dict(size=24, family="Arial", color="black"),
@@ -226,15 +230,17 @@ def create_carbon_trend_chart(historical_data, predicted_data=None):
         plot_bgcolor="rgba(245, 245, 245, 1)",
         paper_bgcolor="rgba(245, 245, 245, 1)",
         height=500,
-        # 移除固定宽度设置，使用容器宽度
+        # 移除固定宽度设置，使用自动调整
         autosize=True,
-        margin=dict(l=50, r=50, b=100, t=100, pad=4),
+        margin=dict(l=20, r=50, b=100, t=100, pad=4),
         xaxis=dict(
             tickfont=dict(color="black"),
             title_font=dict(color="black"),
-            tickangle=-45,  # 倾斜日期标签避免拥挤
-            dtick="D1",  # 每天显示一个刻度
-            tickformat="%m-%d"  # 简化为月-日格式
+            tickangle=-45,
+            tickformat="%m-%d",
+            # 确保x轴标签不会重叠
+            tickmode='auto',
+            nticks=20  # 设置最大刻度数
         ),
         yaxis=dict(
             tickfont=dict(color="black"),
@@ -245,6 +251,12 @@ def create_carbon_trend_chart(historical_data, predicted_data=None):
             y=0.98,
             bgcolor='rgba(255, 255, 255, 0.5)'
         )
+    )
+
+    # 添加响应式配置
+    fig.update_layout(
+        autosize=True,
+        width=None  # 让图表自动填充可用空间
     )
 
     return fig
