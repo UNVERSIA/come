@@ -349,33 +349,44 @@ class CarbonCalculator:
         df_calc = self.calculate_unit_emissions(df_calc)
 
         # 使用时间序列分析而不是简单平均
-        from statsmodels.tsa.holtwinters import ExponentialSmoothing
-
-        # 准备时间序列数据
+        # 移除对statsmodels的依赖，使用pandas内置方法
         ts_data = df_calc.set_index('日期')['total_CO2eq']
 
+        # 使用pandas的rolling和expanding方法代替statsmodels
         try:
-            # 使用指数平滑进行预测
-            model = ExponentialSmoothing(ts_data, trend='add', seasonal='add', seasonal_periods=7)
-            fit = model.fit()
-            predictions = fit.forecast(future_days)
+            # 使用简单移动平均和指数平滑
+            # 计算趋势
+            trend = ts_data.rolling(window=7, min_periods=1).mean()
 
-            # 计算置信区间
-            stderr = fit.sse / len(ts_data)  # 简单估计标准误差
-            lower_bounds = predictions - 1.96 * stderr
-            upper_bounds = predictions + 1.96 * stderr
+            # 计算季节性（如果数据足够）
+            if len(ts_data) >= 14:
+                seasonal = ts_data - trend
+                seasonal_component = seasonal.rolling(window=7, min_periods=1).mean()
+            else:
+                seasonal_component = pd.Series(0, index=ts_data.index)
 
-        except:
-            # 回退到带趋势的线性预测
-            daily_avg = ts_data.mean()
-            trend = ts_data.pct_change().mean()  # 平均日变化率
+            # 基础预测值
+            base_prediction = trend.iloc[-1] if len(trend) > 0 else ts_data.mean()
 
             predictions = []
             for i in range(1, future_days + 1):
-                predicted = daily_avg * (1 + trend) ** i
+                # 简单的趋势外推
+                predicted = base_prediction + (trend.diff().mean() * i if len(trend) > 1 else 0)
+                # 添加季节性成分（如果可用）
+                if not seasonal_component.empty:
+                    predicted += seasonal_component.iloc[-1] if i % 7 == 0 else 0
                 predictions.append(max(0, predicted))
 
-            # 简单置信区间
+            # 计算置信区间
+            std_dev = ts_data.std()
+            lower_bounds = [max(0, p - std_dev) for p in predictions]
+            upper_bounds = [p + std_dev for p in predictions]
+
+        except Exception as e:
+            print(f"简单预测出错: {e}")
+            # 完全回退到平均值方法
+            daily_avg = ts_data.mean()
+            predictions = [daily_avg] * future_days
             std_dev = ts_data.std()
             lower_bounds = [max(0, p - std_dev) for p in predictions]
             upper_bounds = [p + std_dev for p in predictions]
