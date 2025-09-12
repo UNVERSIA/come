@@ -1566,17 +1566,14 @@ with tab5:
                             historical_data = df_with_emissions[['日期', 'total_CO2eq']].tail(30)
                             st.markdown("<br><br>", unsafe_allow_html=True)  # 添加两行空白
                             fig = vis.create_carbon_trend_chart(historical_data, prediction_data)
-                            # 使用两列布局，图表占2/3宽度，表格占1/3宽度
-                            col1, col2 = st.columns([2, 1])
+                            st.plotly_chart(fig, use_container_width=True)
 
-                            with col1:
-                                # 显示预测图表 - 使用全宽
-                                st.plotly_chart(fig, use_container_width=True, height=500)
-
-                            with col2:
-                                # 显示预测数值
-                                st.subheader("预测结果详情")
-                                if not prediction_data.empty:
+                            # 显示预测数值
+                            # 显示预测数值
+                            st.subheader("预测结果详情")
+                            if not prediction_data.empty:
+                                # 使用全宽容器显示表格
+                                with st.container():
                                     # 格式化显示预测数据
                                     display_df = prediction_data.copy()
                                     display_df['日期'] = display_df['日期'].dt.strftime('%Y-%m-%d')
@@ -1590,27 +1587,32 @@ with tab5:
                                     for col in ['预测碳排放(kgCO2eq)', '预测下限(kgCO2eq)', '预测上限(kgCO2eq)']:
                                         display_df[col] = display_df[col].round(1)
 
-                                    # 使用全宽显示表格，设置合适的高度
-                                    st.dataframe(
-                                        display_df,
-                                        use_container_width=True,
-                                        height=min(400, 100 + len(display_df) * 35)  # 动态高度
-                                    )
+                                    # 使用全宽显示表格
+                                    st.dataframe(display_df, use_container_width=True, height=300)  # 使用全宽
 
-                                    # 计算并显示变化趋势
-                                    current_avg = historical_data['total_CO2eq'].mean()
-                                    change = ((prediction - current_avg) / current_avg * 100) if current_avg > 0 else 0
+                                # 计算并显示变化趋势
+                                current_avg = historical_data['total_CO2eq'].mean()
+                                change = ((prediction - current_avg) / current_avg * 100) if current_avg > 0 else 0
 
-                                    # 使用columns来布局指标
-                                    col_a, col_b, col_c = st.columns(3)
-                                    with col_a:
-                                        st.metric("平均预测值", f"{prediction:.1f} kgCO2eq/天")
-                                    with col_b:
-                                        st.metric("预测区间",
-                                                  f"{prediction * 0.9:.1f} - {prediction * 1.1:.1f} kgCO2eq/天")
-                                    with col_c:
-                                        st.metric("变化趋势", f"{change:+.1f}%",
-                                                  delta_color="inverse" if change > 0 else "normal")
+                                # 确保变化趋势有值
+                                if abs(change) < 0.1:  # 如果变化很小，可能是计算错误
+                                    # 使用最近几天的趋势进行估算
+                                    recent_trend = historical_data['total_CO2eq'].pct_change().mean() * 100
+                                    if not np.isnan(recent_trend):
+                                        change = recent_trend
+
+                                # 使用columns来布局指标
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("平均预测值", f"{prediction:.1f} kgCO2eq/天")
+                                with col2:
+                                    st.metric("预测区间", f"{prediction * 0.9:.1f} - {prediction * 1.1:.1f} kgCO2eq/天")
+                                with col3:
+                                    st.metric("变化趋势", f"{change:+.1f}%",
+                                              delta_color="inverse" if change > 0 else "normal")
+                            else:
+                                st.warning("没有预测数据可显示")
+
                         else:
                             st.warning("请先上传数据")
                     except Exception as e:
