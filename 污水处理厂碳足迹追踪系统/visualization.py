@@ -546,8 +546,20 @@ def create_optimization_comparison(optimization_results):
         return fig
 
     def create_historical_trend_chart(historical_data):
-        """创建历史年度碳排放趋势图"""
+        """创建历史年度碳排放趋势图 - 修复版"""
+        if historical_data is None or historical_data.empty:
+            return go.Figure()
+
+        # 确保有必要的列
+        if '日期' not in historical_data.columns or 'total_CO2eq' not in historical_data.columns:
+            return go.Figure()
+
         df = historical_data.copy()
+
+        # 确保日期列是datetime类型
+        if not pd.api.types.is_datetime64_any_dtype(df['日期']):
+            df['日期'] = pd.to_datetime(df['日期'])
+
         df['年份'] = df['日期'].dt.year
         df['月份'] = df['日期'].dt.month
 
