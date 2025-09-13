@@ -525,164 +525,163 @@ def create_optimization_comparison(optimization_results):
 
         return fig
 
-    def create_sensitivity_curve(sensitivity_data, param_name):
-        """创建参数敏感性分析曲线"""
-        fig = go.Figure()
+def create_sensitivity_curve(sensitivity_data, param_name):
+    """创建参数敏感性分析曲线"""
+    fig = go.Figure()
 
-        fig.add_trace(go.Scatter(
-            x=sensitivity_data['adjustment_percent'],
-            y=sensitivity_data['reduction_percent'],
-            mode='lines+markers',
-            name='减排率变化'
-        ))
+    fig.add_trace(go.Scatter(
+        x=sensitivity_data['adjustment_percent'],
+        y=sensitivity_data['reduction_percent'],
+        mode='lines+markers',
+        name='减排率变化'
+    ))
 
-        fig.update_layout(
-            title=f"{param_name}参数敏感性分析",
-            xaxis_title=f"{param_name}调整百分比 (%)",
-            yaxis_title="减排率 (%)",
-            hovermode="x unified"
-        )
-
-        return fig
-
-    def create_historical_trend_chart(historical_data):
-        """创建历史年度碳排放趋势图 - 修复版"""
-        if historical_data is None or historical_data.empty:
-            return go.Figure()
-
-        # 确保有必要的列
-        if '日期' not in historical_data.columns or 'total_CO2eq' not in historical_data.columns:
-            return go.Figure()
-
-        df = historical_data.copy()
-
-        # 确保日期列是datetime类型
-        if not pd.api.types.is_datetime64_any_dtype(df['日期']):
-            df['日期'] = pd.to_datetime(df['日期'])
-
-        df['年份'] = df['日期'].dt.year
-        df['月份'] = df['日期'].dt.month
-
-        # 按年聚合
-        yearly_trend = df.groupby('年份')['total_CO2eq'].sum().reset_index()
-
-        fig = px.line(yearly_trend, x='年份', y='total_CO2eq',
-                      title='历史年度碳排放趋势',
-                      markers=True)
-        fig.update_traces(line=dict(width=3), marker=dict(size=8))
-        fig.update_layout(
-            xaxis_title="年份",
-            yaxis_title="年度总碳排放 (kgCO2eq)",
-            font=dict(size=14, color="black"),
-            plot_bgcolor="rgba(245, 245, 245, 1)",
-            paper_bgcolor="rgba(245, 245, 245, 1)",
-            height=400,
-            xaxis=dict(tickmode='linear', dtick=1)  # 每年一个刻度
-        )
-        return fig
-
-    def create_monthly_trend_chart(historical_data, selected_year=None):
-        """创建指定年份的月度碳排放趋势图"""
-        df = historical_data.copy()
-        df['年份'] = df['日期'].dt.year
-        df['月份'] = df['日期'].dt.month
-
-        if selected_year is None:
-            selected_year = df['年份'].max()  # 默认显示最近一年
-
-        df_year = df[df['年份'] == selected_year]
-        monthly_trend = df_year.groupby('月份')['total_CO2eq'].sum().reset_index()
-
-        fig = px.bar(monthly_trend, x='月份', y='total_CO2eq',
-                     title=f'{selected_year}年月度碳排放',
-                     text_auto='.2s')
-        fig.update_layout(
-            xaxis_title="月份",
-            yaxis_title="月度总碳排放 (kgCO2eq)",
-            font=dict(size=14, color="black"),
-            plot_bgcolor="rgba(245, 245, 245, 1)",
-            paper_bgcolor="rgba(245, 245, 245, 1)",
-            height=400,
-            xaxis=dict(tickmode='linear', dtick=1, range=[0.5, 12.5])  # 1到12月
-        )
-        return fig
-
-    def create_forecast_chart(historical_data, prediction_data):
-        """创建包含历史数据和未来预测的趋势图"""
-        # 准备历史数据用于绘图（按周或月聚合以减少数据点，避免渲染缓慢）
-        df_hist = historical_data.copy()
-        df_hist['日期'] = pd.to_datetime(df_hist['日期'])
-        # 创建年份-周别标识符用于聚合
-        df_hist['Year-Week'] = df_hist['日期'].dt.strftime('%Y-%U')
-        historical_weekly = df_hist.groupby('Year-Week')['total_CO2eq'].mean().reset_index()
-        historical_weekly['日期'] = pd.to_datetime(historical_weekly['Year-Week'] + '-1', format='%Y-%U-%w')  # 获取每周的第一天
-        historical_weekly['类型'] = '历史数据'
-
-        # 准备预测数据
-        df_pred = prediction_data.copy()
-        df_pred['日期'] = pd.to_datetime(df_pred['日期'])
-        df_pred['Year-Week'] = df_pred['日期'].dt.strftime('%Y-%U')
-        prediction_weekly = df_pred.groupby('Year-Week').agg(
-            {'predicted_CO2eq': 'mean', 'lower_bound': 'mean', 'upper_bound': 'mean'}).reset_index()
-        prediction_weekly['日期'] = pd.to_datetime(prediction_weekly['Year-Week'] + '-1', format='%Y-%U-%w')
-        prediction_weekly['类型'] = '预测数据'
-
-        # 合并数据
-        plot_df = pd.concat([
-            historical_weekly[['日期', 'total_CO2eq', '类型']].rename(columns={'total_CO2eq': 'value'}),
-            prediction_weekly[['日期', 'predicted_CO2eq', '类型']].rename(columns={'predicted_CO2eq': 'value'})
-        ], ignore_index=True)
-
-        fig = go.Figure()
-
-        # 绘制历史数据线
-        fig.add_trace(go.Scatter(
-            x=historical_weekly['日期'],
-            y=historical_weekly['total_CO2eq'],
-            mode='lines',
-            name='历史数据',
-            line=dict(color='blue', width=2),
-            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>周均值: %{y:.0f} kgCO2eq<extra></extra>'
-        ))
-
-        # 绘制预测数据线和置信区间
-        fig.add_trace(go.Scatter(
-            x=prediction_weekly['日期'], y=prediction_weekly['upper_bound'],
-            mode='lines', line=dict(width=0), showlegend=False,
-            hoverinfo='skip', name='预测上限'
-        ))
-        fig.add_trace(go.Scatter(
-            x=prediction_weekly['日期'], y=prediction_weekly['lower_bound'],
-            mode='lines', line=dict(width=0), fillcolor='rgba(255, 165, 0, 0.2)',
-            fill='tonexty', showlegend=False, hoverinfo='skip', name='预测下限'
-        ))
-        fig.add_trace(go.Scatter(
-            x=prediction_weekly['日期'],
-            y=prediction_weekly['predicted_CO2eq'],
-            mode='lines',
-            name='预测数据',
-            line=dict(color='orange', width=2, dash='dash'),
-            hovertemplate='<b>%{x|%Y-%m-%d}</b><br>预测周均值: %{y:.0f} kgCO2eq<extra></extra>'
-        ))
-
-        # 找到历史数据和预测数据的分界点，添加一条竖线
-        split_date = historical_weekly['日期'].max()
-        fig.add_vline(x=split_date, line_width=2, line_dash="dash", line_color="green",
-                      annotation_text="预测开始", annotation_position="top right")
-
-        fig.update_layout(
-            title="碳排放历史趋势与未来预测",
-            xaxis_title="时间 (按周聚合)",
-            yaxis_title="碳排放周平均值 (kgCO2eq)",
-            hovermode="x unified",
-            font=dict(size=14, color="black"),
-            plot_bgcolor="rgba(245, 245, 245, 1)",
-            paper_bgcolor="rgba(245, 245, 245, 1)",
-            height=500,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-        )
-
-        return fig
+    fig.update_layout(
+        title=f"{param_name}参数敏感性分析",
+        xaxis_title=f"{param_name}调整百分比 (%)",
+        yaxis_title="减排率 (%)",
+        hovermode="x unified"
+    )
 
     return fig
+
+def create_historical_trend_chart(historical_data):
+    """创建历史年度碳排放趋势图 - 修复版"""
+    if historical_data is None or historical_data.empty:
+        return go.Figure()
+
+    # 确保有必要的列
+    if '日期' not in historical_data.columns or 'total_CO2eq' not in historical_data.columns:
+        return go.Figure()
+
+    df = historical_data.copy()
+
+    # 确保日期列是datetime类型
+    if not pd.api.types.is_datetime64_any_dtype(df['日期']):
+        df['日期'] = pd.to_datetime(df['日期'])
+
+    df['年份'] = df['日期'].dt.year
+    df['月份'] = df['日期'].dt.month
+
+    # 按年聚合
+    yearly_trend = df.groupby('年份')['total_CO2eq'].sum().reset_index()
+
+    fig = px.line(yearly_trend, x='年份', y='total_CO2eq',
+                    title='历史年度碳排放趋势',
+                    markers=True)
+    fig.update_traces(line=dict(width=3), marker=dict(size=8))
+    fig.update_layout(
+        xaxis_title="年份",
+        yaxis_title="年度总碳排放 (kgCO2eq)",
+        font=dict(size=14, color="black"),
+        plot_bgcolor="rgba(245, 245, 245, 1)",
+        paper_bgcolor="rgba(245, 245, 245, 1)",
+        height=400,
+        xaxis=dict(tickmode='linear', dtick=1)  # 每年一个刻度
+    )
+    return fig
+
+def create_monthly_trend_chart(historical_data, selected_year=None):
+    """创建指定年份的月度碳排放趋势图"""
+    df = historical_data.copy()
+    df['年份'] = df['日期'].dt.year
+    df['月份'] = df['日期'].dt.month
+
+    if selected_year is None:
+        selected_year = df['年份'].max()  # 默认显示最近一年
+
+    df_year = df[df['年份'] == selected_year]
+    monthly_trend = df_year.groupby('月份')['total_CO2eq'].sum().reset_index()
+
+    fig = px.bar(monthly_trend, x='月份', y='total_CO2eq',
+                 title=f'{selected_year}年月度碳排放',
+                 text_auto='.2s')
+    fig.update_layout(
+        xaxis_title="月份",
+        yaxis_title="月度总碳排放 (kgCO2eq)",
+        font=dict(size=14, color="black"),
+        plot_bgcolor="rgba(245, 245, 245, 1)",
+        paper_bgcolor="rgba(245, 245, 245, 1)",
+        height=400,
+        xaxis=dict(tickmode='linear', dtick=1, range=[0.5, 12.5])  # 1到12月
+    )
+    return fig
+
+def create_forecast_chart(historical_data, prediction_data):
+    """创建包含历史数据和未来预测的趋势图"""
+    # 准备历史数据用于绘图（按周或月聚合以减少数据点，避免渲染缓慢）
+    df_hist = historical_data.copy()
+    df_hist['日期'] = pd.to_datetime(df_hist['日期'])
+    # 创建年份-周别标识符用于聚合
+    df_hist['Year-Week'] = df_hist['日期'].dt.strftime('%Y-%U')
+    historical_weekly = df_hist.groupby('Year-Week')['total_CO2eq'].mean().reset_index()
+    historical_weekly['日期'] = pd.to_datetime(historical_weekly['Year-Week'] + '-1', format='%Y-%U-%w')  # 获取每周的第一天
+    historical_weekly['类型'] = '历史数据'
+
+    # 准备预测数据
+    df_pred = prediction_data.copy()
+    df_pred['日期'] = pd.to_datetime(df_pred['日期'])
+    df_pred['Year-Week'] = df_pred['日期'].dt.strftime('%Y-%U')
+    prediction_weekly = df_pred.groupby('Year-Week').agg(
+        {'predicted_CO2eq': 'mean', 'lower_bound': 'mean', 'upper_bound': 'mean'}).reset_index()
+    prediction_weekly['日期'] = pd.to_datetime(prediction_weekly['Year-Week'] + '-1', format='%Y-%U-%w')
+    prediction_weekly['类型'] = '预测数据'
+
+    # 合并数据
+    plot_df = pd.concat([
+        historical_weekly[['日期', 'total_CO2eq', '类型']].rename(columns={'total_CO2eq': 'value'}),
+        prediction_weekly[['日期', 'predicted_CO2eq', '类型']].rename(columns={'predicted_CO2eq': 'value'})
+    ], ignore_index=True)
+
+    fig = go.Figure()
+
+    # 绘制历史数据线
+    fig.add_trace(go.Scatter(
+        x=historical_weekly['日期'],
+        y=historical_weekly['total_CO2eq'],
+        mode='lines',
+        name='历史数据',
+        line=dict(color='blue', width=2),
+        hovertemplate='<b>%{x|%Y-%m-%d}</b><br>周均值: %{y:.0f} kgCO2eq<extra></extra>'
+    ))
+
+    # 绘制预测数据线和置信区间
+    fig.add_trace(go.Scatter(
+        x=prediction_weekly['日期'], y=prediction_weekly['upper_bound'],
+        mode='lines', line=dict(width=0), showlegend=False,
+        hoverinfo='skip', name='预测上限'
+    ))
+    fig.add_trace(go.Scatter(
+        x=prediction_weekly['日期'], y=prediction_weekly['lower_bound'],
+        mode='lines', line=dict(width=0), fillcolor='rgba(255, 165, 0, 0.2)',
+        fill='tonexty', showlegend=False, hoverinfo='skip', name='预测下限'
+    ))
+    fig.add_trace(go.Scatter(
+        x=prediction_weekly['日期'],
+        y=prediction_weekly['predicted_CO2eq'],
+        mode='lines',
+        name='预测数据',
+        line=dict(color='orange', width=2, dash='dash'),
+        hovertemplate='<b>%{x|%Y-%m-%d}</b><br>预测周均值: %{y:.0f} kgCO2eq<extra></extra>'
+    ))
+
+    # 找到历史数据和预测数据的分界点，添加一条竖线
+    split_date = historical_weekly['日期'].max()
+    fig.add_vline(x=split_date, line_width=2, line_dash="dash", line_color="green",
+                     annotation_text="预测开始", annotation_position="top right")
+
+    fig.update_layout(
+        title="碳排放历史趋势与未来预测",
+        xaxis_title="时间 (按周聚合)",
+        yaxis_title="碳排放周平均值 (kgCO2eq)",
+        hovermode="x unified",
+        font=dict(size=14, color="black"),
+        plot_bgcolor="rgba(245, 245, 245, 1)",
+        paper_bgcolor="rgba(245, 245, 245, 1)",
+        height=500,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+
+    return fig
+
 
