@@ -1587,8 +1587,14 @@ with tab5:
 
             with tab1:
                 # 显示历史年度趋势
-                yearly_fig = vis.create_historical_trend_chart(st.session_state.historical_data)
-                st.plotly_chart(yearly_fig, use_container_width=True)
+                try:
+                    yearly_fig = vis.create_historical_trend_chart(st.session_state.historical_data)
+                    st.plotly_chart(yearly_fig, use_container_width=True)
+                except Exception as e:
+                    st.error(f"创建历史趋势图时出错: {str(e)}")
+                    # 显示数据信息用于调试
+                    st.write("历史数据列名:", st.session_state.historical_data.columns.tolist())
+                    st.write("历史数据形状:", st.session_state.historical_data.shape)
 
                 # 显示最近一年的月度趋势
                 recent_year = st.session_state.historical_data['日期'].dt.year.max()
@@ -1693,6 +1699,46 @@ with tab5:
                           delta_color="inverse" if change > 0 else "normal")
         else:
             st.warning("没有预测数据可显示")
+
+        # 添加前瞻性指导建议
+        if st.session_state.prediction_made and not st.session_state.prediction_data.empty:
+            st.subheader("前瞻性运行指导建议")
+
+            # 计算趋势
+            current_avg = st.session_state.historical_data['total_CO2eq'].mean()
+            predicted_avg = st.session_state.prediction_data['predicted_CO2eq'].mean()
+            trend = "上升" if predicted_avg > current_avg else "下降"
+            change_percent = abs((predicted_avg - current_avg) / current_avg * 100)
+
+            # 根据趋势提供建议
+            if trend == "上升":
+                st.warning(f"⚠️ 预测显示未来碳排放将{trend}{change_percent:.1f}%")
+                st.info("""
+                **建议措施：**
+                - 检查曝气系统效率，优化曝气量控制
+                - 评估化学药剂投加量，避免过量使用
+                - 加强进水水质监控，预防冲击负荷
+                - 考虑实施节能技术改造
+                """)
+            else:
+                st.success(f"✅ 预测显示未来碳排放将{trend}{change_percent:.1f}%")
+                st.info("""
+                **保持措施：**
+                - 维持当前优化运行参数
+                - 继续监控关键工艺指标
+                - 定期维护设备确保高效运行
+                """)
+
+            # 添加技术投资建议
+            st.subheader("减排技术投资建议")
+            tech_recommendations = {
+                "高效曝气系统": {"减排潜力": "15-25%", "投资回收期": "2-4年", "适用性": "高"},
+                "光伏发电": {"减排潜力": "20-30%", "投资回收期": "5-8年", "适用性": "中"},
+                "污泥厌氧消化": {"减排潜力": "10-20%", "投资回收期": "3-5年", "适用性": "中高"}
+            }
+
+            tech_df = pd.DataFrame(tech_recommendations).T
+            st.dataframe(tech_df)
 
     # 显示模型状态
     st.subheader("模型状态")
