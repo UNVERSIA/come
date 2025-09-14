@@ -667,8 +667,10 @@ def create_forecast_chart(historical_data, prediction_data):
 
     # 找到历史数据和预测数据的分界点，添加一条竖线
     split_date = historical_weekly['日期'].max()
-    fig.add_vline(x=split_date, line_width=2, line_dash="dash", line_color="green",
-                     annotation_text="预测开始", annotation_position="top right")
+    # 转换为 matplotlib 日期数值（Plotly 兼容的格式）
+    split_date_num = split_date.value // 10 ** 6  # 转换为毫秒
+    fig.add_vline(x=split_date_num, line_width=2, line_dash="dash", line_color="green",
+                  annotation_text="预测开始", annotation_position="top right")
 
     fig.update_layout(
         title="碳排放历史趋势与未来预测",
