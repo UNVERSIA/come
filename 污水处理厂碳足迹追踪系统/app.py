@@ -1617,8 +1617,12 @@ with tab5:
 
                     # 创建月度对比图
                     comparison_data['年月'] = comparison_data['日期'].dt.strftime('%Y-%m')
-                    monthly_comparison = comparison_data.groupby(['年月', '日期'].dt.year)[
-                        'total_CO2eq'].mean().reset_index()
+                    # 提取年份用于分组
+                    comparison_data = comparison_data.copy()  # 避免SettingWithCopyWarning
+                    comparison_data['年份'] = comparison_data['日期'].dt.year
+
+                    # 按年月和年份分组
+                    monthly_comparison = comparison_data.groupby(['年月', '年份'])['total_CO2eq'].mean().reset_index()
 
                     fig = px.line(monthly_comparison, x='年月', y='total_CO2eq', color='日期',
                                   title="多年月度碳排放对比")
