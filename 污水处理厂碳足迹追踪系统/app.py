@@ -1680,9 +1680,12 @@ with tab5:
             # 使用全宽显示表格
             st.dataframe(display_df, use_container_width=True)
 
+            # 计算平均预测值
+            avg_prediction = st.session_state.prediction_data['predicted_CO2eq'].mean()
+
             # 计算并显示变化趋势
             current_avg = st.session_state.historical_data['total_CO2eq'].mean()
-            change = ((st.session_state.prediction - current_avg) / current_avg * 100) if current_avg > 0 else 0
+            change = ((avg_prediction - current_avg) / current_avg * 100) if current_avg > 0 else 0
 
             # 确保变化趋势有值
             if abs(change) < 0.1:  # 如果变化很小，可能是计算错误
@@ -1694,10 +1697,12 @@ with tab5:
             # 使用columns来布局指标
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("平均预测值", f"{st.session_state.prediction:.1f} kgCO2eq/天")
+                st.metric("平均预测值", f"{avg_prediction:.1f} kgCO2eq/天")
             with col2:
-                st.metric("预测区间",
-                          f"{st.session_state.prediction * 0.9:.1f} - {st.session_state.prediction * 1.1:.1f} kgCO2eq/天")
+                # 使用预测数据的上下界来计算区间
+                avg_lower = st.session_state.prediction_data['lower_bound'].mean()
+                avg_upper = st.session_state.prediction_data['upper_bound'].mean()
+                st.metric("预测区间", f"{avg_lower:.1f} - {avg_upper:.1f} kgCO2eq/天")
             with col3:
                 st.metric("变化趋势", f"{change:+.1f}%",
                           delta_color="inverse" if change > 0 else "normal")
