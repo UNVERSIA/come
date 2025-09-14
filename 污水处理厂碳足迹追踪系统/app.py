@@ -1624,7 +1624,7 @@ with tab5:
                     # 按年月和年份分组
                     monthly_comparison = comparison_data.groupby(['年月', '年份'])['total_CO2eq'].mean().reset_index()
 
-                    fig = px.line(monthly_comparison, x='年月', y='total_CO2eq', color='日期',
+                    fig = px.line(monthly_comparison, x='年月', y='total_CO2eq', color='年份',
                                   title="多年月度碳排放对比")
                     fig.update_layout(
                         xaxis_title="年月",
