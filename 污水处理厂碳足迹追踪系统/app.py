@@ -1589,20 +1589,6 @@ with tab5:
             not st.session_state.historical_data.empty and
             not st.session_state.prediction_data.empty):
 
-        # 将日预测数据聚合为月数据
-        prediction_monthly = st.session_state.prediction_data.copy()
-        prediction_monthly['年月'] = prediction_monthly['日期'].dt.to_period('M')
-        monthly_agg = prediction_monthly.groupby('年月').agg({
-            'predicted_CO2eq': 'mean',
-            'lower_bound': 'mean',
-            'upper_bound': 'mean'
-        }).reset_index()
-        monthly_agg['年月'] = monthly_agg['年月'].dt.to_timestamp()
-
-        # 显示月度预测图表
-        monthly_fig = vis.create_monthly_forecast_chart(monthly_agg)
-        st.plotly_chart(monthly_fig)
-
         # 显示预测统计信息
         st.subheader("预测统计信息")
 
