@@ -32,6 +32,8 @@ class CarbonLSTMPredictor:
             'PAM投加量(kg)', '次氯酸钠投加量(kg)',
             '进水COD(mg/L)', '出水COD(mg/L)', '进水TN(mg/L)', '出水TN(mg/L)'
         ]
+        self.start_date = pd.Timestamp('2020-01-01')  # 添加默认起始日期
+        self.end_date = pd.Timestamp('2022-12-31')  # 添加默认结束日期
 
     def generate_simulated_data(self, save_path="data/simulated_data.csv"):
         """生成完整的模拟数据集"""
@@ -70,6 +72,59 @@ class CarbonLSTMPredictor:
         print(f"模拟数据已生成并保存到 {save_path}，共 {len(df)} 条记录")
 
         return df
+
+    def generate_water_flow(self, length):
+        """生成处理水量数据"""
+        # 基础水量 + 季节性波动 + 随机噪声
+        base_flow = 50000
+        seasonal = 5000 * np.sin(np.arange(length) * 2 * np.pi / 365)
+        noise = np.random.normal(0, 1000, length)
+        return base_flow + seasonal + noise
+
+    def generate_energy_consumption(self, water_flow, length):
+        """生成电耗数据"""
+        # 与处理水量正相关，但有基础能耗
+        base_energy = 5000
+        flow_factor = 0.1
+        noise = np.random.normal(0, 200, length)
+        return base_energy + flow_factor * water_flow + noise
+
+    def generate_chemical_usage(self, water_flow, length):
+        """生成化学品投加量数据"""
+        # 与处理水量正相关
+        pac_factor = 0.01
+        pam_factor = 0.002
+        naclo_factor = 0.005
+
+        pac_usage = pac_factor * water_flow + np.random.normal(0, 10, length)
+        pam_usage = pam_factor * water_flow + np.random.normal(0, 5, length)
+        naclo_usage = naclo_factor * water_flow + np.random.normal(0, 8, length)
+
+        return pac_usage, pam_usage, naclo_usage
+
+    def generate_water_quality(self, length):
+        """生成水质数据"""
+        # 进水COD - 有季节性变化
+        cod_in_base = 300
+        cod_in_seasonal = 100 * np.sin(np.arange(length) * 2 * np.pi / 365 + np.pi / 4)
+        cod_in_noise = np.random.normal(0, 20, length)
+        cod_in = cod_in_base + cod_in_seasonal + cod_in_noise
+
+        # 出水COD - 与进水相关但更稳定
+        removal_efficiency = 0.85 + np.random.normal(0, 0.05, length)
+        cod_out = cod_in * (1 - removal_efficiency)
+
+        # 进水TN
+        tn_in_base = 40
+        tn_in_seasonal = 10 * np.sin(np.arange(length) * 2 * np.pi / 365 + np.pi / 3)
+        tn_in_noise = np.random.normal(0, 5, length)
+        tn_in = tn_in_base + tn_in_seasonal + tn_in_noise
+
+        # 出水TN
+        tn_removal = 0.7 + np.random.normal(0, 0.1, length)
+        tn_out = tn_in * (1 - tn_removal)
+
+        return cod_in, cod_out, tn_in, tn_out
 
     def build_model(self, input_shape):
         """构建LSTM模型 - 使用更兼容的方式"""
@@ -137,12 +192,19 @@ class CarbonLSTMPredictor:
                 valid_values = df[col].dropna().values.reshape(-1, 1)
                 if len(valid_values) > 0:
                     self.feature_scalers[col].fit(valid_values)
+            else:
+                # 如果特征列不存在，创建默认缩放器
+                self.feature_scalers[col] = MinMaxScaler()
+                self.feature_scalers[col].fit(np.array([[0], [1]]))  # 使用默认范围
 
         # 目标变量缩放器
         self.target_scaler = MinMaxScaler()
         target_values = df[target_column].dropna().values.reshape(-1, 1)
         if len(target_values) > 0:
             self.target_scaler.fit(target_values)
+        else:
+            # 如果目标值全为NaN，使用默认范围
+            self.target_scaler.fit(np.array([[0], [1]]))
 
         # 创建序列数据
         for i in range(self.sequence_length, len(df)):
@@ -157,60 +219,73 @@ class CarbonLSTMPredictor:
 
             # 检查特征序列是否有效
             for col in self.feature_columns:
+                # 获取当前特征序列
                 if col in df.columns:
-                    # 获取当前特征序列
                     col_data = df[col].iloc[i - self.sequence_length:i].values
+                else:
+                    # 如果特征列不存在，使用0填充
+                    col_data = np.zeros(self.sequence_length)
 
-                    # 检查是否有NaN值，如果有则使用均值填充
-                    if np.isnan(col_data).any():
-                        # 计算非NaN值的均值
-                        col_mean = np.nanmean(col_data)
-                        # 用均值填充NaN值
-                        col_data = np.where(np.isnan(col_data), col_mean, col_data)
+                # 检查是否有NaN值，如果有则使用均值填充
+                if np.isnan(col_data).any():
+                    # 计算非NaN值的均值
+                    col_mean = np.nanmean(col_data)
+                    # 用均值填充NaN值
+                    col_data = np.where(np.isnan(col_data), col_mean, col_data)
 
-                    # 确保所有值都是有效的
-                    if np.isnan(col_data).any() or len(col_data) != self.sequence_length:
-                        valid_sequence = False
-                        break
+                # 确保所有值都是有效的
+                if np.isnan(col_data).any() or len(col_data) != self.sequence_length:
+                    valid_sequence = False
+                    break
 
-                    # 缩放特征数据
-                    try:
-                        scaled_data = self.feature_scalers[col].transform(col_data.reshape(-1, 1))
-                        sequence_features.append(scaled_data.flatten())
-                    except:
-                        # 如果缩放失败，使用默认值
-                        scaled_data = np.zeros((self.sequence_length, 1))
-                        sequence_features.append(scaled_data.flatten())
-                        valid_sequence = False
+                # 缩放特征数据
+                try:
+                    scaled_data = self.feature_scalers[col].transform(col_data.reshape(-1, 1))
+                    sequence_features.append(scaled_data.flatten())
+                except Exception as e:
+                    print(f"缩放特征 {col} 时出错: {e}")
+                    # 如果缩放失败，使用默认值
+                    scaled_data = np.zeros((self.sequence_length, 1))
+                    sequence_features.append(scaled_data.flatten())
+                    valid_sequence = False
 
             if not valid_sequence or len(sequence_features) == 0:
+                print(f"跳过无效序列 at index {i}")
                 continue
 
             # 确保所有特征序列长度一致
             if not all(len(seq) == self.sequence_length for seq in sequence_features):
+                print(f"序列长度不一致 at index {i}")
                 continue
 
             # 缩放目标值
             try:
                 scaled_target = self.target_scaler.transform([[target]])[0][0]
-            except:
+            except Exception as e:
+                print(f"缩放目标值时出错: {e}")
                 continue
 
-            # 堆叠特征序列
-            try:
-                # 转置以符合LSTM输入格式 [timesteps, features]
-                stacked_sequence = np.stack(sequence_features, axis=1)
+            # 堆叠特征序列 - 添加额外检查
+            if len(sequence_features) > 0:
+                try:
+                    # 转置以符合LSTM输入格式 [timesteps, features]
+                    stacked_sequence = np.stack(sequence_features, axis=1)
 
-                # 添加到数据集
-                X.append(stacked_sequence)
-                y.append(scaled_target)
-            except Exception as e:
-                print(f"堆叠序列时出错: {e}")
+                    # 添加到数据集
+                    X.append(stacked_sequence)
+                    y.append(scaled_target)
+                except Exception as e:
+                    print(f"堆叠序列时出错: {e}")
+                    continue
+            else:
+                print(f"没有特征数据可用于堆叠 at index {i}")
                 continue
 
         # 检查是否有有效数据
         if len(X) == 0:
-            return np.array([]), np.array([])
+            print("警告：没有有效的训练数据")
+            # 返回空数组但形状正确
+            return np.array([]).reshape(0, self.sequence_length, len(self.feature_columns)), np.array([])
 
         return np.array(X), np.array(y)
 
@@ -367,7 +442,6 @@ class CarbonLSTMPredictor:
         historical_data = df.copy()
         # 确保目标列已计算
         if target_column not in historical_data.columns:
-            from carbon_calculator import CarbonCalculator
             calculator = CarbonCalculator()
             historical_data = calculator.calculate_direct_emissions(historical_data)
             historical_data = calculator.calculate_indirect_emissions(historical_data)
@@ -449,7 +523,7 @@ class CarbonLSTMPredictor:
 
                 # 4.2 进行单步预测
                 scaled_prediction = self.model.predict(X_input, verbose=0)[0][0]
-                prediction = self.feature_scalers[target_column].inverse_transform(
+                prediction = self.target_scaler.inverse_transform(
                     [[scaled_prediction]]
                 )[0][0]
                 prediction = max(0, prediction)  # 碳排放不为负
@@ -546,7 +620,7 @@ class CarbonLSTMPredictor:
 
                 try:
                     scaled_pred = self.model.predict(X_test, verbose=0)[0][0]
-                    prediction = self.feature_scalers[target_column].inverse_transform([[scaled_pred]])[0][0]
+                    prediction = self.target_scaler.inverse_transform([[scaled_pred]])[0][0]
                     error = abs(prediction - actual_value) / actual_value if actual_value > 0 else 0
                     historical_errors.append(error)
                 except:
