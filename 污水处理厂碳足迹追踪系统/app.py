@@ -1576,92 +1576,92 @@ with tab5:
     with predict_col3:
         st.info("使用当前模型对未来碳排放进行预测。可以调整预测天数，结果将显示预测图表和关键指标。")
 
-    # 显示预测结果（占据整个宽度）
-        # 在tab5中替换预测结果显示部分
-        if (st.session_state.get('prediction_made', False) and
-                not st.session_state.historical_data.empty and
-                not st.session_state.prediction_data.empty):
+    # 第四部分：预测结果显示（移到三列布局之外，占据全宽）
+    if (st.session_state.get('prediction_made', False) and
+            not st.session_state.historical_data.empty and
+            not st.session_state.prediction_data.empty):
 
-            # 显示多个图表
-            tab1, tab2, tab3 = st.tabs(["历史趋势", "年度对比", "未来预测"])
+        # 显示多个图表
+        tab1, tab2, tab3 = st.tabs(["历史趋势", "年度对比", "未来预测"])
 
-            with tab1:
-                # 显示历史年度趋势
-                try:
-                    yearly_fig = vis.create_historical_trend_chart(st.session_state.historical_data)
-                    st.plotly_chart(yearly_fig, use_container_width=True)
-                except Exception as e:
-                    st.error(f"创建历史趋势图时出错: {str(e)}")
-                    # 显示数据信息用于调试
-                    st.write("历史数据列名:", st.session_state.historical_data.columns.tolist())
-                    st.write("历史数据形状:", st.session_state.historical_data.shape)
+        with tab1:
+            # 显示历史年度趋势
+            try:
+                yearly_fig = vis.create_historical_trend_chart(st.session_state.historical_data)
+                st.plotly_chart(yearly_fig, use_container_width=True)
+            except Exception as e:
+                st.error(f"创建历史趋势图时出错: {str(e)}")
+                # 显示数据信息用于调试
+                st.write("历史数据列名:", st.session_state.historical_data.columns.tolist())
+                st.write("历史数据形状:", st.session_state.historical_data.shape)
 
-                # 显示最近一年的月度趋势
-                recent_year = st.session_state.historical_data['日期'].dt.year.max()
-                monthly_fig = vis.create_monthly_trend_chart(st.session_state.historical_data, recent_year)
-                st.plotly_chart(monthly_fig, use_container_width=True)
+            # 显示最近一年的月度趋势
+            recent_year = st.session_state.historical_data['日期'].dt.year.max()
+            monthly_fig = vis.create_monthly_trend_chart(st.session_state.historical_data, recent_year)
+            st.plotly_chart(monthly_fig, use_container_width=True)
 
-            with tab2:
-                # 显示多年对比
-                st.subheader("多年碳排放对比")
-                years = st.multiselect(
-                    "选择对比年份",
-                    options=sorted(st.session_state.historical_data['日期'].dt.year.unique()),
-                    default=sorted(st.session_state.historical_data['日期'].dt.year.unique())[-3:]  # 默认最近3年
+        with tab2:
+            # 显示多年对比
+            st.subheader("多年碳排放对比")
+            years = st.multiselect(
+                "选择对比年份",
+                options=sorted(st.session_state.historical_data['日期'].dt.year.unique()),
+                default=sorted(st.session_state.historical_data['日期'].dt.year.unique())[-3:]  # 默认最近3年
+            )
+
+            if years:
+                comparison_data = st.session_state.historical_data[
+                    st.session_state.historical_data['日期'].dt.year.isin(years)
+                ]
+
+                # 创建月度对比图
+                comparison_data['年月'] = comparison_data['日期'].dt.strftime('%Y-%m')
+                # 提取年份用于分组
+                comparison_data = comparison_data.copy()  # 避免SettingWithCopyWarning
+                comparison_data['年份'] = comparison_data['日期'].dt.year
+
+                # 按年月和年份分组
+                monthly_comparison = comparison_data.groupby(['年月', '年份'])['total_CO2eq'].mean().reset_index()
+
+                fig = px.line(monthly_comparison, x='年月', y='total_CO2eq', color='年份',
+                              title="多年月度碳排放对比")
+                fig.update_layout(
+                    xaxis_title="年月",
+                    yaxis_title="月均碳排放 (kgCO2eq)",
+                    height=500
                 )
+                st.plotly_chart(fig, use_container_width=True)
 
-                if years:
-                    comparison_data = st.session_state.historical_data[
-                        st.session_state.historical_data['日期'].dt.year.isin(years)
-                    ]
+        with tab3:
+            # 显示未来预测
+            forecast_fig = vis.create_forecast_chart(
+                st.session_state.historical_data,
+                st.session_state.prediction_data
+            )
+            st.plotly_chart(forecast_fig, use_container_width=True)
 
-                    # 创建月度对比图
-                    comparison_data['年月'] = comparison_data['日期'].dt.strftime('%Y-%m')
-                    # 提取年份用于分组
-                    comparison_data = comparison_data.copy()  # 避免SettingWithCopyWarning
-                    comparison_data['年份'] = comparison_data['日期'].dt.year
+            # 显示预测统计信息
+            st.subheader("预测统计信息")
+            col1, col2, col3 = st.columns(3)
 
-                    # 按年月和年份分组
-                    monthly_comparison = comparison_data.groupby(['年月', '年份'])['total_CO2eq'].mean().reset_index()
+            with col1:
+                avg_prediction = st.session_state.prediction_data['predicted_CO2eq'].mean()
+                st.metric("预测期日均排放", f"{avg_prediction:.1f} kgCO2eq")
 
-                    fig = px.line(monthly_comparison, x='年月', y='total_CO2eq', color='年份',
-                                  title="多年月度碳排放对比")
-                    fig.update_layout(
-                        xaxis_title="年月",
-                        yaxis_title="月均碳排放 (kgCO2eq)",
-                        height=500
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
+            with col2:
+                total_prediction = st.session_state.prediction_data['predicted_CO2eq'].sum()
+                st.metric("预测期总排放", f"{total_prediction:.0f} kgCO2eq")
 
-            with tab3:
-                # 显示未来预测
-                forecast_fig = vis.create_forecast_chart(
-                    st.session_state.historical_data,
-                    st.session_state.prediction_data
-                )
-                st.plotly_chart(forecast_fig, use_container_width=True)
+            with col3:
+                # 计算与历史同期的变化
+                historical_avg = st.session_state.historical_data['total_CO2eq'].mean()
+                change_percent = ((avg_prediction - historical_avg) / historical_avg) * 100
+                st.metric("与历史同期相比", f"{change_percent:+.1f}%")
+    else:
+        st.warning("没有足够的数据进行预测或预测未完成")
 
-                # 显示预测统计信息
-                st.subheader("预测统计信息")
-                col1, col2, col3 = st.columns(3)
-
-                with col1:
-                    avg_prediction = st.session_state.prediction_data['predicted_CO2eq'].mean()
-                    st.metric("预测期日均排放", f"{avg_prediction:.1f} kgCO2eq")
-
-                with col2:
-                    total_prediction = st.session_state.prediction_data['predicted_CO2eq'].sum()
-                    st.metric("预测期总排放", f"{total_prediction:.0f} kgCO2eq")
-
-                with col3:
-                    # 计算与历史同期的变化
-                    historical_avg = st.session_state.historical_data['total_CO2eq'].mean()
-                    change_percent = ((avg_prediction - historical_avg) / historical_avg) * 100
-                    st.metric("与历史同期相比", f"{change_percent:+.1f}%")
-        else:
-            st.warning("没有足够的数据进行预测或预测未完成")
-
-        # 显示预测数值
+    # 显示预测数值
+    if st.session_state.get('prediction_made', False):
         st.subheader("预测结果详情")
         if not st.session_state.prediction_data.empty:
             # 格式化显示预测数据
