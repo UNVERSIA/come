@@ -4,6 +4,8 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 
+from carbon_calculator import CarbonCalculator
+
 
 class DataSimulator:
     def __init__(self):
@@ -127,13 +129,24 @@ class DataSimulator:
         for col in df.select_dtypes(include=[np.number]).columns:
             df[col] = df[col].abs()
 
+        # 计算碳排放数据（确保包含total_CO2eq列）
+        try:
+            calculator = CarbonCalculator()
+            df_with_emissions = calculator.calculate_direct_emissions(df)
+            df_with_emissions = calculator.calculate_indirect_emissions(df_with_emissions)
+            df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
+            df = df_with_emissions
+        except Exception as e:
+            print(f"计算碳排放数据时出错: {e}")
+            # 如果计算失败，添加一个默认的total_CO2eq列
+            df['total_CO2eq'] = df['电耗(kWh)'] * 0.5 + df['处理水量(m³)'] * 0.1
+
         # 保存到文件
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         df.to_csv(save_path, index=False, encoding='utf-8')
         print(f"模拟数据已生成并保存到 {save_path}，共 {len(df)} 条记录")
 
         return df
-
 
 # 使用示例
 if __name__ == "__main__":
