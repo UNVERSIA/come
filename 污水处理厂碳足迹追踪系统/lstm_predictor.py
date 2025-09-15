@@ -188,6 +188,27 @@ class CarbonLSTMPredictor:
         if len(df) < self.sequence_length * 2:
             raise ValueError(f"需要至少 {self.sequence_length * 2} 条记录进行训练，当前只有 {len(df)} 条")
 
+        # 确保所有必需的特征列都存在，如果不存在则创建并填充默认值
+        for col in self.feature_columns:
+            if col not in df.columns:
+                print(f"警告: 特征列 '{col}' 不存在，将使用默认值填充")
+                if col == '处理水量(m³)':
+                    df[col] = 10000  # 默认处理水量
+                elif col == '电耗(kWh)':
+                    df[col] = 3000  # 默认电耗
+                elif col in ['PAC投加量(kg)', 'PAM投加量(kg)', '次氯酸钠投加量(kg)']:
+                    df[col] = 0  # 默认药剂投加量
+                elif col in ['进水COD(mg/L)', '出水COD(mg/L)', '进水TN(mg/L)', '出水TN(mg/L)']:
+                    # 根据典型污水处理厂水质设置默认值
+                    if col == '进水COD(mg/L)':
+                        df[col] = 200
+                    elif col == '出水COD(mg/L)':
+                        df[col] = 50
+                    elif col == '进水TN(mg/L)':
+                        df[col] = 40
+                    elif col == '出水TN(mg/L)':
+                        df[col] = 15
+
         # 初始化特征数据列表
         X, y = [], []
 
