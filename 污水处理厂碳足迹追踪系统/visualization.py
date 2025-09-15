@@ -186,7 +186,8 @@ def create_carbon_trend_chart(historical_data, predicted_data=None):
         x=historical_data['日期'], y=historical_data['total_CO2eq'],
         mode='lines+markers', name='历史碳排放',
         line=dict(color='#1f77b4', width=3),
-        marker=dict(size=6)
+        marker=dict(size=6),
+        textfont=dict(color='black')  # 添加文本颜色
     ))
 
     # 预测数据（如果有）
@@ -204,7 +205,8 @@ def create_carbon_trend_chart(historical_data, predicted_data=None):
             x=predicted_data['日期'], y=predicted_data[pred_col],
             mode='lines+markers', name='预测碳排放',
             line=dict(color='#ff7f0e', width=3, dash='dash'),
-            marker=dict(size=6)
+            marker=dict(size=6),
+            textfont=dict(color='black')  # 添加文本颜色
         ))
 
         # 添加置信区间（如果有）
@@ -212,13 +214,15 @@ def create_carbon_trend_chart(historical_data, predicted_data=None):
             fig.add_trace(go.Scatter(
                 x=predicted_data['日期'], y=predicted_data[upper_col],
                 mode='lines', line=dict(width=0), showlegend=False,
-                name='预测上限'
+                name='预测上限',
+                textfont=dict(color='black')  # 添加文本颜色
             ))
             fig.add_trace(go.Scatter(
                 x=predicted_data['日期'], y=predicted_data[lower_col],
                 mode='lines', line=dict(width=0), fill='tonexty',
                 fillcolor='rgba(255, 127, 14, 0.2)', showlegend=False,
-                name='预测下限'
+                name='预测下限',
+                textfont=dict(color='black')  # 添加文本颜色
             ))
 
     # 使用更灵活的布局设置
@@ -249,7 +253,8 @@ def create_carbon_trend_chart(historical_data, predicted_data=None):
         legend=dict(
             x=0.02,
             y=0.98,
-            bgcolor='rgba(255, 255, 255, 0.5)'
+            bgcolor='rgba(255, 255, 255, 0.5)',
+            font=dict(color='black')  # 确保图例文字为黑色
         )
     )
 
@@ -642,19 +647,22 @@ def create_forecast_chart(historical_data, prediction_data):
         mode='lines',
         name='历史数据',
         line=dict(color='blue', width=2),
-        hovertemplate='<b>%{x|%Y-%m-%d}</b><br>周均值: %{y:.0f} kgCO2eq<extra></extra>'
+        hovertemplate='<b>%{x|%Y-%m-%d}</b><br>周均值: %{y:.0f} kgCO2eq<extra></extra>',
+        textfont=dict(color='black')  # 添加文本颜色
     ))
 
     # 绘制预测数据线和置信区间
     fig.add_trace(go.Scatter(
         x=prediction_weekly['日期'], y=prediction_weekly['upper_bound'],
         mode='lines', line=dict(width=0), showlegend=False,
-        hoverinfo='skip', name='预测上限'
+        hoverinfo='skip', name='预测上限',
+        textfont=dict(color='black')  # 添加文本颜色
     ))
     fig.add_trace(go.Scatter(
         x=prediction_weekly['日期'], y=prediction_weekly['lower_bound'],
         mode='lines', line=dict(width=0), fillcolor='rgba(255, 165, 0, 0.2)',
-        fill='tonexty', showlegend=False, hoverinfo='skip', name='预测下限'
+        fill='tonexty', showlegend=False, hoverinfo='skip', name='预测下限',
+        textfont=dict(color='black')  # 添加文本颜色
     ))
     fig.add_trace(go.Scatter(
         x=prediction_weekly['日期'],
@@ -662,7 +670,8 @@ def create_forecast_chart(historical_data, prediction_data):
         mode='lines',
         name='预测数据',
         line=dict(color='orange', width=2, dash='dash'),
-        hovertemplate='<b>%{x|%Y-%m-%d}</b><br>预测周均值: %{y:.0f} kgCO2eq<extra></extra>'
+        hovertemplate='<b>%{x|%Y-%m-%d}</b><br>预测周均值: %{y:.0f} kgCO2eq<extra></extra>',
+        textfont=dict(color='black')  # 添加文本颜色
     ))
 
     # 找到历史数据和预测数据的分界点，添加一条竖线
@@ -670,7 +679,9 @@ def create_forecast_chart(historical_data, prediction_data):
     # 转换为 matplotlib 日期数值（Plotly 兼容的格式）
     split_date_num = split_date.value // 10 ** 6  # 转换为毫秒
     fig.add_vline(x=split_date_num, line_width=2, line_dash="dash", line_color="green",
-                  annotation_text="预测开始", annotation_position="top right")
+                  annotation_text="预测开始",
+                  annotation_position="top right",
+                  annotation_font=dict(color="black"))  # 添加注释字体颜色
 
     fig.update_layout(
         title="碳排放历史趋势与未来预测",
@@ -681,7 +692,20 @@ def create_forecast_chart(historical_data, prediction_data):
         plot_bgcolor="rgba(245, 245, 245, 1)",
         paper_bgcolor="rgba(245, 245, 245, 1)",
         height=500,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            font=dict(color="black")  # 确保图例文字为黑色
+        ),
+        xaxis=dict(
+            tickfont=dict(color="black")  # 确保x轴刻度文字为黑色
+        ),
+        yaxis=dict(
+            tickfont=dict(color="black")  # 确保y轴刻度文字为黑色
+        )
     )
 
     return fig
@@ -694,21 +718,24 @@ def create_monthly_forecast_chart(monthly_prediction):
     fig.add_trace(go.Scatter(
         x=monthly_prediction['年月'], y=monthly_prediction['predicted_CO2eq'],
         mode='lines+markers', name='月均预测',
-        line=dict(color='#FF7F0E', width=3)
+        line=dict(color='#FF7F0E', width=3),
+        textfont=dict(color='black')  # 添加文本颜色
     ))
 
     # 添加上下界
     fig.add_trace(go.Scatter(
         x=monthly_prediction['年月'], y=monthly_prediction['upper_bound'],
         mode='lines', name='预测上限',
-        line=dict(width=0), showlegend=False
+        line=dict(width=0), showlegend=False,
+        textfont=dict(color='black')  # 添加文本颜色
     ))
 
     fig.add_trace(go.Scatter(
         x=monthly_prediction['年月'], y=monthly_prediction['lower_bound'],
         mode='lines', name='预测下限',
         line=dict(width=0), fill='tonexty',
-        fillcolor='rgba(255, 127, 14, 0.2)', showlegend=False
+        fillcolor='rgba(255, 127, 14, 0.2)', showlegend=False,
+        textfont=dict(color='black')  # 添加文本颜色
     ))
 
     fig.update_layout(
@@ -721,7 +748,14 @@ def create_monthly_forecast_chart(monthly_prediction):
         height=400,
         xaxis=dict(
             tickformat="%Y-%m",
-            tickangle=45
+            tickangle=45,
+            tickfont=dict(color="black")  # 确保x轴刻度文字为黑色
+        ),
+        yaxis=dict(
+            tickfont=dict(color="black")  # 确保y轴刻度文字为黑色
+        ),
+        legend=dict(
+            font=dict(color="black")  # 确保图例文字为黑色
         )
     )
 
