@@ -268,6 +268,12 @@ class CarbonLSTMPredictor:
             # 堆叠特征序列 - 添加额外检查
             if len(sequence_features) > 0:
                 try:
+                    # 检查所有序列长度是否一致
+                    seq_lengths = [len(seq) for seq in sequence_features]
+                    if len(set(seq_lengths)) != 1:
+                        print(f"序列长度不一致 at index {i}: {seq_lengths}")
+                        continue
+
                     # 转置以符合LSTM输入格式 [timesteps, features]
                     stacked_sequence = np.stack(sequence_features, axis=1)
 
