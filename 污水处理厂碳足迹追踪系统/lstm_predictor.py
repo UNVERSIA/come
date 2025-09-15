@@ -457,6 +457,26 @@ class CarbonLSTMPredictor:
         if self.model is None:
             raise ValueError("模型未加载，请先加载或训练模型")
 
+        # 确保目标缩放器存在
+        if not hasattr(self, 'target_scaler'):
+            self.target_scaler = MinMaxScaler()
+            # 如果目标列存在，初始化缩放器
+            if target_column in df.columns:
+                target_values = df[target_column].dropna().values.reshape(-1, 1)
+                if len(target_values) > 0:
+                    self.target_scaler.fit(target_values)
+
+        # 确保特征缩放器存在
+        if not hasattr(self, 'feature_scalers') or not self.feature_scalers:
+            self.feature_scalers = {}
+            for col in self.feature_columns:
+                if col in df.columns:
+                    self.feature_scalers[col] = MinMaxScaler()
+                    col_data = df[col].dropna().values.reshape(-1, 1)
+                    if len(col_data) > 0:
+                        self.feature_scalers[col].fit(col_data)
+
+
         # 0. 数据准备与校验
         df = df.sort_values('日期').reset_index(drop=True)
         if len(df) < self.sequence_length:
