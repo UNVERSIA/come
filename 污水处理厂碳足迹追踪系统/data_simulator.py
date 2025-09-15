@@ -1,3 +1,5 @@
+import os
+
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -84,38 +86,44 @@ class DataSimulator:
 
         return cod_in, cod_out, tn_in, tn_out
 
-    def generate_simulated_data(self, save_path="data/simulated_data.csv"):
-        """生成完整的模拟数据集"""
-        date_range = pd.date_range(self.start_date, self.end_date)
-        length = len(date_range)
 
-        # 生成各指标数据
-        water_flow = self.generate_water_flow(length)
-        energy_consumption = self.generate_energy_consumption(water_flow, length)
-        pac_usage, pam_usage, naclo_usage = self.generate_chemical_usage(water_flow, length)
-        cod_in, cod_out, tn_in, tn_out = self.generate_water_quality(length)
+def generate_simulated_data(self, save_path="data/simulated_data.csv"):
+    """生成完整的模拟数据集"""
+    # 确保生成足够长的数据（至少2年）
+    if (self.end_date - self.start_date).days < 730:
+        self.end_date = self.start_date + timedelta(days=730)  # 至少2年数据
 
-        # 构建DataFrame
-        data = {
-            "日期": date_range,
-            "处理水量(m³)": np.round(water_flow),
-            "电耗(kWh)": np.round(energy_consumption),
-            "PAC投加量(kg)": np.round(pac_usage),
-            "PAM投加量(kg)": np.round(pam_usage),
-            "次氯酸钠投加量(kg)": np.round(naclo_usage),
-            "进水COD(mg/L)": np.round(cod_in, 1),
-            "出水COD(mg/L)": np.round(cod_out, 1),
-            "进水TN(mg/L)": np.round(tn_in, 1),
-            "出水TN(mg/L)": np.round(tn_out, 1)
-        }
+    date_range = pd.date_range(self.start_date, self.end_date)
+    length = len(date_range)
 
-        df = pd.DataFrame(data)
+    # 生成各指标数据
+    water_flow = self.generate_water_flow(length)
+    energy_consumption = self.generate_energy_consumption(water_flow, length)
+    pac_usage, pam_usage, naclo_usage = self.generate_chemical_usage(water_flow, length)
+    cod_in, cod_out, tn_in, tn_out = self.generate_water_quality(length)
 
-        # 保存到文件
-        df.to_csv(save_path, index=False, encoding='utf-8')
-        print(f"模拟数据已生成并保存到 {save_path}，共 {len(df)} 条记录")
+    # 构建DataFrame
+    data = {
+        "日期": date_range,
+        "处理水量(m³)": np.round(water_flow),
+        "电耗(kWh)": np.round(energy_consumption),
+        "PAC投加量(kg)": np.round(pac_usage),
+        "PAM投加量(kg)": np.round(pam_usage),
+        "次氯酸钠投加量(kg)": np.round(naclo_usage),
+        "进水COD(mg/L)": np.round(cod_in, 1),
+        "出水COD(mg/L)": np.round(cod_out, 1),
+        "进水TN(mg/L)": np.round(tn_in, 1),
+        "出水TN(mg/L)": np.round(tn_out, 1)
+    }
 
-        return df
+    df = pd.DataFrame(data)
+
+    # 保存到文件
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    df.to_csv(save_path, index=False, encoding='utf-8')
+    print(f"模拟数据已生成并保存到 {save_path}，共 {len(df)} 条记录")
+
+    return df
 
 
 # 使用示例
