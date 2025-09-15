@@ -88,9 +88,9 @@ class DataSimulator:
 
     def generate_simulated_data(self, save_path="data/simulated_data.csv"):
         """生成完整的模拟数据集"""
-        # 确保生成足够长的数据（至少2年）
-        if (self.end_date - self.start_date).days < 730:
-            self.end_date = self.start_date + timedelta(days=730)  # 至少2年数据
+        # 确保生成足够长的数据（至少3年）
+        if (self.end_date - self.start_date).days < 1095:
+            self.end_date = self.start_date + timedelta(days=1095)  # 至少3年数据
 
         date_range = pd.date_range(self.start_date, self.end_date)
         length = len(date_range)
@@ -101,7 +101,7 @@ class DataSimulator:
         pac_usage, pam_usage, naclo_usage = self.generate_chemical_usage(water_flow, length)
         cod_in, cod_out, tn_in, tn_out = self.generate_water_quality(length)
 
-        # 构建DataFrame
+        # 构建DataFrame - 确保包含LSTM预测器所需的所有列
         data = {
             "日期": date_range,
             "处理水量(m³)": np.round(water_flow),
@@ -112,10 +112,20 @@ class DataSimulator:
             "进水COD(mg/L)": np.round(cod_in, 1),
             "出水COD(mg/L)": np.round(cod_out, 1),
             "进水TN(mg/L)": np.round(tn_in, 1),
-            "出水TN(mg/L)": np.round(tn_out, 1)
+            "出水TN(mg/L)": np.round(tn_out, 1),
+            # 添加一些可能用到的其他列
+            "自来水(m³/d)": np.round(water_flow * 0.05),  # 假设自来水用量为处理水量的5%
+            "脱水污泥外运量(80%)": np.round(water_flow * 0.001)  # 假设污泥产量为处理水量的0.1%
         }
 
         df = pd.DataFrame(data)
+
+        # 确保没有NaN值
+        df = df.fillna(0)
+
+        # 确保所有数值都是正数
+        for col in df.select_dtypes(include=[np.number]).columns:
+            df[col] = df[col].abs()
 
         # 保存到文件
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
