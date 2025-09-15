@@ -1518,14 +1518,14 @@ with tab5:
 
         # 第三部分：进行预测
         st.subheader("3. 预测设置")
-        predict_col1, predict_col2, predict_col3 = st.columns([1, 2, 2])
+        predict_col1, predict_col2, predict_col3 = st.columns([2, 1, 2])
 
         with predict_col1:
-            # 移除天数选择滑动条，固定预测365天（一年）
-            prediction_days = 365
-            st.info(f"预测范围: 2025年全年 (365天)")
+            st.info("使用当前模型对未来碳排放进行预测。预测结果将显示2025年全年的月度数据。")
 
         with predict_col2:
+            # 移除天数选择滑动条，固定预测365天（一年）
+            prediction_days = 365
             if st.button("进行预测", key="predict_btn"):
                 if st.session_state.lstm_predictor is not None:
                     with st.spinner("正在进行2025年全年预测，这可能需要几分钟..."):
@@ -1613,11 +1613,11 @@ with tab5:
 
                             except Exception as fallback_error:
                                 st.error(f"简单预测也失败: {str(fallback_error)}")
-            else:
-                st.warning("请先加载或训练模型")
+                else:
+                    st.warning("请先加载或训练模型")
 
-    with predict_col3:
-        st.info("使用当前模型对未来碳排放进行预测。可以调整预测天数，结果将显示预测图表和关键指标。")
+        with predict_col3:
+            st.info(f"预测范围: 2025年全年 (365天)")
 
     # 第四部分：预测结果显示（移到三列布局之外，占据全宽）
     if (st.session_state.get('prediction_made', False) and
