@@ -33,80 +33,43 @@ class CarbonLSTMPredictor:
             '进水COD(mg/L)', '出水COD(mg/L)', '进水TN(mg/L)', '出水TN(mg/L)'
         ]
 
-    def prepare_training_data(self, df, target_column='total_CO2eq'):
-        """准备训练数据 - 修复数组长度问题"""
-        # 确保数据按日期排序
-        df = df.sort_values('日期').reset_index(drop=True)
+    def generate_simulated_data(self, save_path="data/simulated_data.csv"):
+        """生成完整的模拟数据集"""
+        # 确保生成足够长的数据（至少2年）
+        if (self.end_date - self.start_date).days < 730:
+            self.end_date = self.start_date + timedelta(days=730)  # 至少2年数据
 
-        # 检查并处理缺失值
-        for col in self.feature_columns + [target_column]:
-            if col not in df.columns:
-                # 对于确实不存在的列，使用前向填充或插值
-                if col == target_column:
-                    # 对于目标列，使用碳计算器计算
-                    calculator = CarbonCalculator()
-                    df_with_emissions = calculator.calculate_direct_emissions(df)
-                    df_with_emissions = calculator.calculate_indirect_emissions(df_with_emissions)
-                    df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
-                    df[target_column] = df_with_emissions[target_column]
-                else:
-                    # 对于其他特征，使用0填充（但尽量避免这种情况）
-                    df[col] = 0.0
-            elif df[col].isnull().any():
-                # 对存在的列但有缺失值的情况进行插值
-                df[col] = df[col].interpolate(method='linear').fillna(method='bfill').fillna(method='ffill')
+        date_range = pd.date_range(self.start_date, self.end_date)
+        length = len(date_range)
 
-        # 单独缩放每个特征
-        scaled_features = {}
-        for col in self.feature_columns + [target_column]:
-            self.feature_scalers[col] = MinMaxScaler()
-            # 确保数据至少有两个样本以供缩放
-            if len(df) < 2:
-                # 如果数据不足，创建虚拟数据
-                dummy_data = np.array([[0.0], [1.0]])
-                scaled_data = self.feature_scalers[col].fit_transform(dummy_data)
-                # 使用第一个值填充所有位置
-                scaled_features[col] = np.full(len(df), scaled_data[0, 0])
-            else:
-                scaled_data = self.feature_scalers[col].fit_transform(df[[col]])
-                scaled_features[col] = scaled_data.flatten()  # 确保是一维数组
+        # 生成各指标数据
+        water_flow = self.generate_water_flow(length)
+        energy_consumption = self.generate_energy_consumption(water_flow, length)
+        pac_usage, pam_usage, naclo_usage = self.generate_chemical_usage(water_flow, length)
+        cod_in, cod_out, tn_in, tn_out = self.generate_water_quality(length)
 
-        # 创建序列数据 - 确保所有特征长度一致
-        X, y = [], []
-        valid_indices = range(self.sequence_length, len(df) - self.forecast_days)
+        # 构建DataFrame
+        data = {
+            "日期": date_range,
+            "处理水量(m³)": np.round(water_flow),
+            "电耗(kWh)": np.round(energy_consumption),
+            "PAC投加量(kg)": np.round(pac_usage),
+            "PAM投加量(kg)": np.round(pam_usage),
+            "次氯酸钠投加量(kg)": np.round(naclo_usage),
+            "进水COD(mg/L)": np.round(cod_in, 1),
+            "出水COD(mg/L)": np.round(cod_out, 1),
+            "进水TN(mg/L)": np.round(tn_in, 1),
+            "出水TN(mg/L)": np.round(tn_out, 1)
+        }
 
-        for i in valid_indices:
-            # 特征序列 - 确保所有特征长度一致
-            seq_features = []
-            for col in self.feature_columns:
-                feature_seq = scaled_features[col][i - self.sequence_length:i]
-                seq_features.append(feature_seq)
+        df = pd.DataFrame(data)
 
-            # 检查所有特征序列长度是否一致
-            seq_lengths = [len(seq) for seq in seq_features]
-            if len(set(seq_lengths)) != 1:
-                # 如果长度不一致，进行截断或填充
-                min_length = min(seq_lengths)
-                seq_features = [seq[:min_length] for seq in seq_features]
+        # 保存到文件
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        df.to_csv(save_path, index=False, encoding='utf-8')
+        print(f"模拟数据已生成并保存到 {save_path}，共 {len(df)} 条记录")
 
-            # 目标值（未来forecast_d天的平均值）
-            target_values = scaled_features[target_column][i:i + self.forecast_days]
-            if len(target_values) == self.forecast_days:  # 确保有足够的目标值
-                seq_target = np.mean(target_values)
-
-                # 确保所有特征序列长度相同
-                if all(len(seq) == self.sequence_length for seq in seq_features):
-                    X.append(np.column_stack(seq_features))  # 使用column_stack确保形状正确
-                    y.append(seq_target)
-
-        # 转换为numpy数组前检查是否为空
-        if len(X) == 0:
-            # 如果数据不足，创建一些虚拟数据
-            dummy_X = np.random.rand(10, self.sequence_length, len(self.feature_columns))
-            dummy_y = np.random.rand(10)
-            return dummy_X, dummy_y
-
-        return np.array(X), np.array(y)
+        return df
 
     def build_model(self, input_shape):
         """构建LSTM模型 - 使用更兼容的方式"""
