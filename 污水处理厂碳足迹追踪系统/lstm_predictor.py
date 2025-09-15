@@ -180,22 +180,36 @@ class CarbonLSTMPredictor:
         # 确保数据按日期排序
         df = df.sort_values('日期').reset_index(drop=True)
 
+        # 检查目标列是否存在且有有效数据
+        if target_column not in df.columns or df[target_column].isna().all():
+            raise ValueError(f"目标列 '{target_column}' 不存在或全部为NaN值")
+
+        # 检查是否有足够的数据
+        if len(df) < self.sequence_length * 2:
+            raise ValueError(f"需要至少 {self.sequence_length * 2} 条记录进行训练，当前只有 {len(df)} 条")
+
         # 初始化特征数据列表
         X, y = [], []
 
         # 为每个特征创建单独的缩放器
         self.feature_scalers = {}
+        valid_features = []
+
+        # 只处理实际存在的特征列
         for col in self.feature_columns:
-            if col in df.columns:
+            if col in df.columns and not df[col].isna().all():
                 self.feature_scalers[col] = MinMaxScaler()
                 # 只使用非NaN值进行拟合
                 valid_values = df[col].dropna().values.reshape(-1, 1)
                 if len(valid_values) > 0:
                     self.feature_scalers[col].fit(valid_values)
+                    valid_features.append(col)
             else:
-                # 如果特征列不存在，创建默认缩放器
-                self.feature_scalers[col] = MinMaxScaler()
-                self.feature_scalers[col].fit(np.array([[0], [1]]))  # 使用默认范围
+                print(f"警告: 特征列 '{col}' 不存在或全部为NaN值，将跳过")
+
+        # 如果没有有效特征，抛出错误
+        if not valid_features:
+            raise ValueError("没有有效的特征列可用于训练")
 
         # 目标变量缩放器
         self.target_scaler = MinMaxScaler()
@@ -203,111 +217,80 @@ class CarbonLSTMPredictor:
         if len(target_values) > 0:
             self.target_scaler.fit(target_values)
         else:
-            # 如果目标值全为NaN，使用默认范围
-            self.target_scaler.fit(np.array([[0], [1]]))
+            raise ValueError(f"目标列 '{target_column}' 没有有效值")
 
         # 创建序列数据
+        valid_count = 0
         for i in range(self.sequence_length, len(df)):
-            # 提取特征序列
-            sequence_features = []
-            valid_sequence = True
-
             # 检查目标值是否有效
             target = df[target_column].iloc[i]
             if np.isnan(target):
-                continue  # 这个continue在循环内是正确的
+                continue
 
-            # 检查特征序列是否有效
-            for col in self.feature_columns:
+            # 提取特征序列
+            sequence_features = []
+            has_valid_data = False
+
+            for col in valid_features:
                 # 获取当前特征序列
-                if col in df.columns:
-                    col_data = df[col].iloc[i - self.sequence_length:i].values
-                else:
-                    # 如果特征列不存在，使用0填充
-                    col_data = np.zeros(self.sequence_length)
-                    valid_sequence = False  # 标记为无效序列但继续处理
+                col_data = df[col].iloc[i - self.sequence_length:i].values
 
                 # 检查是否有NaN值，如果有则使用均值填充
                 if np.isnan(col_data).any():
-                    # 计算非NaN值的均值
                     col_mean = np.nanmean(col_data)
-                    # 用均值填充NaN值
+                    if np.isnan(col_mean):  # 如果均值也是NaN，使用0
+                        col_mean = 0
                     col_data = np.where(np.isnan(col_data), col_mean, col_data)
 
                 # 确保所有值都是有效的
                 if np.isnan(col_data).any() or len(col_data) != self.sequence_length:
                     # 如果数据无效，使用0填充整个序列
                     col_data = np.zeros(self.sequence_length)
-                    valid_sequence = False  # 标记为无效序列但继续处理
+                else:
+                    has_valid_data = True
 
                 # 缩放特征数据
                 try:
-                    # 检查缩放器是否已经拟合
-                    if hasattr(self.feature_scalers[col], 'n_samples_seen_') and self.feature_scalers[
-                        col].n_samples_seen_ > 0:
-                        scaled_data = self.feature_scalers[col].transform(col_data.reshape(-1, 1))
-                    else:
-                        # 如果缩放器未拟合，使用0填充
-                        scaled_data = np.zeros((len(col_data), 1))
+                    scaled_data = self.feature_scalers[col].transform(col_data.reshape(-1, 1))
                     sequence_features.append(scaled_data.flatten())
                 except Exception as e:
                     print(f"缩放特征 {col} 时出错: {e}")
                     # 如果缩放失败，使用0填充
                     scaled_data = np.zeros((len(col_data), 1))
                     sequence_features.append(scaled_data.flatten())
-                    valid_sequence = False
 
-            # 检查是否有特征数据
-            if not sequence_features:
-                print(f"警告: 序列 {i} 没有可用的特征数据，跳过该序列")
-                continue  # 这个continue在循环内是正确的
-
-            # 即使序列被标记为无效，我们仍然尝试使用它，但记录警告
-            if not valid_sequence:
-                print(f"警告: 序列 {i} 包含无效数据，使用填充值")
+            # 如果没有有效数据，跳过该序列
+            if not has_valid_data:
+                continue
 
             # 确保所有特征序列长度一致
             if not all(len(seq) == self.sequence_length for seq in sequence_features):
-                print(f"序列长度不一致 at index {i}")
-                continue  # 这个continue在循环内是正确的
+                continue
 
             # 缩放目标值
             try:
                 scaled_target = self.target_scaler.transform([[target]])[0][0]
             except Exception as e:
                 print(f"缩放目标值时出错: {e}")
-                continue  # 这个continue在循环内是正确的
+                continue
 
             # 堆叠特征序列
             try:
-                # 检查sequence_features是否为空
-                if not sequence_features:
-                    print(f"警告: 序列 {i} 没有特征数据，跳过")
-                    continue
-
-                # 检查所有序列长度是否一致
-                seq_lengths = [len(seq) for seq in sequence_features]
-                if len(set(seq_lengths)) != 1:
-                    print(f"序列长度不一致 at index {i}: {seq_lengths}")
-                    continue
-
-                # 转置以符合LSTM输入格式 [timesteps, features]
                 stacked_sequence = np.stack(sequence_features, axis=1)
 
                 # 添加到数据集
                 X.append(stacked_sequence)
                 y.append(scaled_target)
+                valid_count += 1
             except Exception as e:
                 print(f"堆叠序列时出错: {e}")
                 continue
 
         # 检查是否有有效数据
-        if len(X) == 0:
-            print("警告：没有有效的训练数据")
-            # 生成一些模拟数据作为备选
-            print("生成模拟训练数据作为备选方案")
-            X = np.random.rand(10, self.sequence_length, len(self.feature_columns)) * 0.1
-            y = np.random.rand(10) * 0.1
+        if valid_count == 0:
+            raise ValueError("没有有效的训练序列")
+
+        print(f"成功创建 {valid_count} 个有效训练序列")
 
         return np.array(X), np.array(y)
 
