@@ -1524,9 +1524,6 @@ with tab5:
         prediction_days = st.slider("预测天数", 30, 730, 365, key="prediction_days") # 30-365天，默认90天
 
     with predict_col2:
-        # 替换预测按钮点击事件的处理代码
-        # 替换预测按钮点击事件的处理代码
-        # ... （在tab5的预测按钮点击事件中）
         if st.button("进行预测", key="predict_btn"):
             if st.session_state.lstm_predictor is not None:
                 with st.spinner("正在进行预测，这可能需要几分钟..."):
@@ -1560,14 +1557,24 @@ with tab5:
 
                     except Exception as e:
                         st.error(f"预测失败: {str(e)}")
-                        # ... 错误处理 ...
                         # 使用简单预测作为备选
                         try:
                             calculator = CarbonCalculator()
+                            # 确保历史数据已计算碳排放
+                            historical_data_full = st.session_state.df.copy()
+                            historical_data_full['日期'] = pd.to_datetime(historical_data_full['日期'])
+                            historical_data_full = historical_data_full.sort_values('日期').reset_index(drop=True)
+
+                            if 'total_CO2eq' not in historical_data_full.columns:
+                                historical_data_full = calculator.calculate_direct_emissions(historical_data_full)
+                                historical_data_full = calculator.calculate_indirect_emissions(historical_data_full)
+                                historical_data_full = calculator.calculate_unit_emissions(historical_data_full)
+
                             simple_prediction = calculator._simple_emission_prediction(
-                                st.session_state.df, prediction_days
+                                historical_data_full, prediction_days
                             )
                             st.session_state.prediction_data = simple_prediction
+                            st.session_state.historical_data = historical_data_full  # 存储历史数据
                             st.session_state.prediction_made = True
                         except Exception as fallback_error:
                             st.error(f"简单预测也失败: {str(fallback_error)}")
