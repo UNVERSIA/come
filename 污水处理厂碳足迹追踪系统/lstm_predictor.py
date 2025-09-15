@@ -215,7 +215,7 @@ class CarbonLSTMPredictor:
             # 检查目标值是否有效
             target = df[target_column].iloc[i]
             if np.isnan(target):
-                continue
+                continue  # 这个continue在循环内是正确的
 
             # 检查特征序列是否有效
             for col in self.feature_columns:
@@ -225,6 +225,7 @@ class CarbonLSTMPredictor:
                 else:
                     # 如果特征列不存在，使用0填充
                     col_data = np.zeros(self.sequence_length)
+                    valid_sequence = False  # 标记为无效序列但继续处理
 
                 # 检查是否有NaN值，如果有则使用均值填充
                 if np.isnan(col_data).any():
@@ -256,6 +257,11 @@ class CarbonLSTMPredictor:
                     sequence_features.append(scaled_data.flatten())
                     valid_sequence = False
 
+            # 检查是否有特征数据
+            if not sequence_features:
+                print(f"警告: 序列 {i} 没有可用的特征数据，跳过该序列")
+                continue  # 这个continue在循环内是正确的
+
             # 即使序列被标记为无效，我们仍然尝试使用它，但记录警告
             if not valid_sequence:
                 print(f"警告: 序列 {i} 包含无效数据，使用填充值")
@@ -263,14 +269,14 @@ class CarbonLSTMPredictor:
             # 确保所有特征序列长度一致
             if not all(len(seq) == self.sequence_length for seq in sequence_features):
                 print(f"序列长度不一致 at index {i}")
-                continue
+                continue  # 这个continue在循环内是正确的
 
             # 缩放目标值
             try:
                 scaled_target = self.target_scaler.transform([[target]])[0][0]
             except Exception as e:
                 print(f"缩放目标值时出错: {e}")
-                continue
+                continue  # 这个continue在循环内是正确的
 
             # 堆叠特征序列
             try:
@@ -278,7 +284,7 @@ class CarbonLSTMPredictor:
                 seq_lengths = [len(seq) for seq in sequence_features]
                 if len(set(seq_lengths)) != 1:
                     print(f"序列长度不一致 at index {i}: {seq_lengths}")
-                    continue
+                    continue  # 这个continue在循环内是正确的
 
                 # 转置以符合LSTM输入格式 [timesteps, features]
                 stacked_sequence = np.stack(sequence_features, axis=1)
@@ -288,7 +294,7 @@ class CarbonLSTMPredictor:
                 y.append(scaled_target)
             except Exception as e:
                 print(f"堆叠序列时出错: {e}")
-                continue
+                continue  # 这个continue在循环内是正确的
 
         # 检查是否有有效数据
         if len(X) == 0:
@@ -297,7 +303,6 @@ class CarbonLSTMPredictor:
             print("生成模拟训练数据作为备选方案")
             X = np.random.rand(10, self.sequence_length, len(self.feature_columns)) * 0.1
             y = np.random.rand(10) * 0.1
-            return X, y
 
         return np.array(X), np.array(y)
 
