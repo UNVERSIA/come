@@ -1525,6 +1525,7 @@ with tab5:
 
     with predict_col2:
         # 替换预测按钮点击事件的处理代码
+        # 替换预测按钮点击事件的处理代码
         # ... （在tab5的预测按钮点击事件中）
         if st.button("进行预测", key="predict_btn"):
             if st.session_state.lstm_predictor is not None:
