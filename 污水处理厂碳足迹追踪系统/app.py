@@ -1619,7 +1619,7 @@ with tab5:
         with predict_col2:
             # 移除天数选择滑动条，固定预测365天（一年）
             prediction_days = 365
-            if st.button("进行预测", key="predict_btn"):
+            if st.button("进行预测", key="predict_btn2"):
                 if st.session_state.lstm_predictor is not None:
                     with st.spinner("正在进行2025年全年预测，这可能需要几分钟..."):
                         try:
