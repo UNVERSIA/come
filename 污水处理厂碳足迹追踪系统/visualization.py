@@ -687,3 +687,44 @@ def create_forecast_chart(historical_data, prediction_data):
     return fig
 
 
+def create_monthly_forecast_chart(monthly_prediction):
+    """创建月度预测图表"""
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=monthly_prediction['年月'], y=monthly_prediction['predicted_CO2eq'],
+        mode='lines+markers', name='月均预测',
+        line=dict(color='#FF7F0E', width=3)
+    ))
+
+    # 添加上下界
+    fig.add_trace(go.Scatter(
+        x=monthly_prediction['年月'], y=monthly_prediction['upper_bound'],
+        mode='lines', name='预测上限',
+        line=dict(width=0), showlegend=False
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=monthly_prediction['年月'], y=monthly_prediction['lower_bound'],
+        mode='lines', name='预测下限',
+        line=dict(width=0), fill='tonexty',
+        fillcolor='rgba(255, 127, 14, 0.2)', showlegend=False
+    ))
+
+    fig.update_layout(
+        title="未来12个月碳排放预测",
+        xaxis_title="月份",
+        yaxis_title="月均碳排放 (kgCO2eq)",
+        font=dict(size=14, color="black"),
+        plot_bgcolor="rgba(245, 245, 245, 1)",
+        paper_bgcolor="rgba(245, 245, 245, 1)",
+        height=400,
+        xaxis=dict(
+            tickformat="%Y-%m",
+            tickangle=45
+        )
+    )
+
+    return fig
+
+
