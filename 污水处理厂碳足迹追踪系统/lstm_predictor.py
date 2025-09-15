@@ -120,8 +120,99 @@ class CarbonLSTMPredictor:
 
         return history
 
-    # lstm_predictor.py
-    # 修改load_model方法
+    def prepare_training_data(self, df, target_column):
+        """准备训练数据 - 修复版"""
+        # 确保数据按日期排序
+        df = df.sort_values('日期').reset_index(drop=True)
+
+        # 初始化特征数据列表
+        X, y = [], []
+
+        # 为每个特征创建单独的缩放器
+        self.feature_scalers = {}
+        for col in self.feature_columns:
+            if col in df.columns:
+                self.feature_scalers[col] = MinMaxScaler()
+                # 只使用非NaN值进行拟合
+                valid_values = df[col].dropna().values.reshape(-1, 1)
+                if len(valid_values) > 0:
+                    self.feature_scalers[col].fit(valid_values)
+
+        # 目标变量缩放器
+        self.target_scaler = MinMaxScaler()
+        target_values = df[target_column].dropna().values.reshape(-1, 1)
+        if len(target_values) > 0:
+            self.target_scaler.fit(target_values)
+
+        # 创建序列数据
+        for i in range(self.sequence_length, len(df)):
+            # 提取特征序列
+            sequence_features = []
+            valid_sequence = True
+
+            # 检查目标值是否有效
+            target = df[target_column].iloc[i]
+            if np.isnan(target):
+                continue
+
+            # 检查特征序列是否有效
+            for col in self.feature_columns:
+                if col in df.columns:
+                    # 获取当前特征序列
+                    col_data = df[col].iloc[i - self.sequence_length:i].values
+
+                    # 检查是否有NaN值，如果有则使用均值填充
+                    if np.isnan(col_data).any():
+                        # 计算非NaN值的均值
+                        col_mean = np.nanmean(col_data)
+                        # 用均值填充NaN值
+                        col_data = np.where(np.isnan(col_data), col_mean, col_data)
+
+                    # 确保所有值都是有效的
+                    if np.isnan(col_data).any() or len(col_data) != self.sequence_length:
+                        valid_sequence = False
+                        break
+
+                    # 缩放特征数据
+                    try:
+                        scaled_data = self.feature_scalers[col].transform(col_data.reshape(-1, 1))
+                        sequence_features.append(scaled_data.flatten())
+                    except:
+                        # 如果缩放失败，使用默认值
+                        scaled_data = np.zeros((self.sequence_length, 1))
+                        sequence_features.append(scaled_data.flatten())
+                        valid_sequence = False
+
+            if not valid_sequence or len(sequence_features) == 0:
+                continue
+
+            # 确保所有特征序列长度一致
+            if not all(len(seq) == self.sequence_length for seq in sequence_features):
+                continue
+
+            # 缩放目标值
+            try:
+                scaled_target = self.target_scaler.transform([[target]])[0][0]
+            except:
+                continue
+
+            # 堆叠特征序列
+            try:
+                # 转置以符合LSTM输入格式 [timesteps, features]
+                stacked_sequence = np.stack(sequence_features, axis=1)
+
+                # 添加到数据集
+                X.append(stacked_sequence)
+                y.append(scaled_target)
+            except Exception as e:
+                print(f"堆叠序列时出错: {e}")
+                continue
+
+        # 检查是否有有效数据
+        if len(X) == 0:
+            return np.array([]), np.array([])
+
+        return np.array(X), np.array(y)
 
     def load_model(self, model_path='models/carbon_lstm.keras'):
         """加载预训练模型"""
@@ -260,7 +351,6 @@ class CarbonLSTMPredictor:
                 self.model = self.build_model((self.sequence_length, len(self.feature_columns)))
                 self.model.compile(optimizer='adam', loss='mse', metrics=['mae'])
 
-    # 在CarbonLSTMPredictor类中修改predict方法
     def predict(self, df, target_column='total_CO2eq', steps=365):
         """科学的多步预测方法 - 完全重写"""
         if self.model is None:
@@ -319,14 +409,39 @@ class CarbonLSTMPredictor:
             try:
                 # 4.1 准备当前时间步的输入
                 X_input = []
+                missing_features = []
+
                 for col in self.feature_columns:
                     if col in current_sequence.columns and col in self.feature_scalers:
                         col_data = current_sequence[col].values[-self.sequence_length:]
-                        scaled_data = self.feature_scalers[col].transform(col_data.reshape(-1, 1))
-                        X_input.append(scaled_data.flatten())
+
+                        # 检查是否有NaN值，如果有则使用均值填充
+                        if np.isnan(col_data).any():
+                            col_mean = np.nanmean(col_data)
+                            col_data = np.where(np.isnan(col_data), col_mean, col_data)
+
+                        # 缩放特征数据
+                        try:
+                            scaled_data = self.feature_scalers[col].transform(col_data.reshape(-1, 1))
+                            X_input.append(scaled_data.flatten())
+                        except:
+                            # 如果缩放失败，使用0填充
+                            scaled_data = np.zeros((self.sequence_length, 1))
+                            X_input.append(scaled_data.flatten())
+                            missing_features.append(col)
                     else:
-                        # 对于模型训练时未见过的特征，使用默认值（应避免此情况）
-                        raise ValueError(f"特征 '{col}' 在缩放器或数据中未找到。")
+                        # 对于模型训练时未见过的特征，使用0填充
+                        scaled_data = np.zeros((self.sequence_length, 1))
+                        X_input.append(scaled_data.flatten())
+                        missing_features.append(col)
+
+                # 记录缺失的特征
+                if missing_features:
+                    print(f"警告：以下特征缺失或缩放失败，使用0填充: {missing_features}")
+
+                # 确保有数据可堆叠
+                if not X_input:
+                    raise ValueError("没有可用的特征数据进行预测。")
 
                 # 堆叠特征并调整形状为 [1, sequence_length, num_features]
                 X_input = np.stack(X_input, axis=1)
