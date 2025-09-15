@@ -284,7 +284,6 @@ class CarbonLSTMPredictor:
                 self.model.compile(optimizer='adam', loss='mse', metrics=['mae'])
 
     # 在CarbonLSTMPredictor类中修改predict方法
-    # 在CarbonLSTMPredictor类中修改predict方法
     def predict(self, df, target_column='total_CO2eq', steps=365):
         """科学的多步预测方法 - 完全重写"""
         if self.model is None:
@@ -307,15 +306,41 @@ class CarbonLSTMPredictor:
             historical_data = calculator.calculate_indirect_emissions(historical_data)
             historical_data = calculator.calculate_unit_emissions(historical_data)
 
-        # 2. 初始化预测序列：使用最后`sequence_length`天的数据
+        # 2. 分析历史趋势和季节性模式
+        # 使用完整的多年历史数据分析趋势和季节性
+        historical_data['年份'] = historical_data['日期'].dt.year
+        historical_data['月份'] = historical_data['日期'].dt.month
+        historical_data['日期序号'] = (historical_data['日期'] - historical_data['日期'].min()).dt.days
+
+        # 计算各特征的年均增长率和季节性模式
+        feature_trends = {}
+        seasonal_patterns = {}
+
+        for col in self.feature_columns:
+            if col in historical_data.columns:
+                # 计算年均增长率（线性回归斜率）
+                X = historical_data['日期序号'].values.reshape(-1, 1)
+                y = historical_data[col].values
+
+                # 使用稳健的线性回归（Huber回归）
+                from sklearn.linear_model import HuberRegressor
+                model = HuberRegressor()
+                model.fit(X, y)
+                feature_trends[col] = model.coef_[0]  # 每日增长量
+
+                # 计算季节性模式（月度平均值）
+                monthly_avg = historical_data.groupby('月份')[col].mean()
+                seasonal_patterns[col] = monthly_avg.to_dict()
+
+        # 3. 初始化预测序列：使用最后`sequence_length`天的数据
         current_sequence = historical_data.tail(self.sequence_length).copy()
         all_predictions = []
         all_dates = []
 
-        # 3. 多步预测循环
+        # 4. 多步预测循环
         for step in range(steps):
             try:
-                # 3.1 准备当前时间步的输入
+                # 4.1 准备当前时间步的输入
                 X_input = []
                 for col in self.feature_columns:
                     if col in current_sequence.columns and col in self.feature_scalers:
@@ -330,7 +355,7 @@ class CarbonLSTMPredictor:
                 X_input = np.stack(X_input, axis=1)
                 X_input = X_input.reshape(1, self.sequence_length, len(self.feature_columns))
 
-                # 3.2 进行单步预测
+                # 4.2 进行单步预测
                 scaled_prediction = self.model.predict(X_input, verbose=0)[0][0]
                 prediction = self.feature_scalers[target_column].inverse_transform(
                     [[scaled_prediction]]
@@ -338,65 +363,128 @@ class CarbonLSTMPredictor:
                 prediction = max(0, prediction)  # 碳排放不为负
                 all_predictions.append(prediction)
 
-                # 3.3 为下一步预测创建新行（关键步骤：更新所有特征！）
+                # 4.3 为下一步预测创建新行（科学地更新所有特征）
                 last_date = current_sequence['日期'].iloc[-1]
                 next_date = last_date + pd.Timedelta(days=1)
                 all_dates.append(next_date)
 
-                # 创建一个新的DataFrame行，初始化为最后一天的值
+                # 创建一个新的DataFrame行，基于趋势和季节性预测所有特征
                 new_row = current_sequence.iloc[-1:].copy()
                 new_row['日期'] = next_date
 
-                # --- 核心改进：科学地更新特征，而不是用旧值 ---
-                # 方法：对于每个特征，使用其历史趋势（如移动平均）进行外推，并添加合理的噪声和季节性。
+                # 计算下一个日期的特征值（考虑趋势和季节性）
+                next_month = next_date.month
+                days_since_start = (next_date - historical_data['日期'].min()).days
+
                 for col in self.feature_columns:
-                    if col == target_column:
-                        # 目标列用预测值更新
-                        new_row[target_column] = prediction
-                    elif col in current_sequence.columns:
-                        # 对其他特征进行简单的时间序列预测（例如：基于近期趋势和季节性）
-                        series = current_sequence[col].values
-                        # 使用一个简单的策略：近期平均值 + 小幅随机波动 + 季节性分量
-                        recent_avg = np.mean(series[-7:])  # 一周的平均值
-                        seasonal_comp = 0.1 * recent_avg * np.sin(2 * np.pi * (step % 365) / 365)  # 简单的年季节性
-                        noise = np.random.normal(0, recent_avg * 0.02)  # 2%的噪声
-                        predicted_value = recent_avg + seasonal_comp + noise
+                    if col in historical_data.columns:
+                        # 基础值：使用最近7天的平均值
+                        base_value = np.mean(current_sequence[col].values[-7:])
+
+                        # 添加趋势成分
+                        trend_component = 0
+                        if col in feature_trends:
+                            trend_component = feature_trends[col] * days_since_start
+
+                        # 添加季节性成分
+                        seasonal_component = 0
+                        if col in seasonal_patterns and next_month in seasonal_patterns[col]:
+                            # 使用该月份的历史平均值与全年平均值的差异作为季节性
+                            yearly_avg = np.mean(list(seasonal_patterns[col].values()))
+                            seasonal_component = seasonal_patterns[col][next_month] - yearly_avg
+
+                        # 添加合理的随机噪声（最大5%）
+                        noise_component = np.random.normal(0, base_value * 0.05)
+
+                        # 计算预测值
+                        predicted_value = base_value + trend_component + seasonal_component + noise_component
                         predicted_value = max(0, predicted_value)  # 确保值合理
+
                         new_row[col] = predicted_value
 
-                # 3.4 将新行追加到序列中，并移除最旧的一行，保持序列长度不变
+                # 目标列使用模型预测值
+                new_row[target_column] = prediction
+
+                # 4.4 将新行追加到序列中，并移除最旧的一行，保持序列长度不变
                 current_sequence = pd.concat([current_sequence, new_row], ignore_index=True)
                 current_sequence = current_sequence.tail(self.sequence_length).reset_index(drop=True)
 
             except Exception as e:
                 print(f"第{step + 1}步预测失败: {str(e)}")
-                # 如果失败，使用最后有效预测值或历史平均值
-                fallback_value = all_predictions[-1] if all_predictions else historical_data[target_column].mean()
+                # 如果失败，使用更稳健的回退策略
+                if all_predictions:
+                    # 使用指数平滑回退
+                    alpha = 0.3
+                    fallback_value = alpha * all_predictions[-1] + (1 - alpha) * historical_data[target_column].mean()
+                else:
+                    fallback_value = historical_data[target_column].mean()
+
                 all_predictions.append(fallback_value)
-                # 确保日期仍然增加
                 next_date = last_date + pd.Timedelta(days=1) if 'last_date' in locals() else \
-                historical_data['日期'].iloc[-1] + pd.Timedelta(days=step + 1)
+                    historical_data['日期'].iloc[-1] + pd.Timedelta(days=step + 1)
                 all_dates.append(next_date)
 
-        # 4. 生成预测结果DataFrame
+        # 5. 生成预测结果DataFrame
         result_df = pd.DataFrame({
             '日期': all_dates,
             'predicted_CO2eq': all_predictions
         })
 
-        # 5. 计算置信区间（可以使用预测误差的历史标准差）
-        # 这里简化处理，使用一个固定的百分比区间
-        error_std = historical_data[target_column].pct_change().std() * 100  # 历史日变化率的标准差
-        if np.isnan(error_std):
-            error_std = 10  # 默认10%的波动
-        confidence_width = error_std * 0.5  # 缩放一下
+        # 6. 计算科学合理的置信区间
+        # 使用历史预测误差的标准差，考虑趋势不确定性
+        historical_errors = []
+        if len(historical_data) > self.sequence_length:
+            # 使用历史数据进行回测，计算预测误差
+            for i in range(self.sequence_length, len(historical_data)):
+                train_data = historical_data.iloc[:i]
+                actual_value = historical_data.iloc[i][target_column]
 
-        result_df['lower_bound'] = result_df['predicted_CO2eq'] * (1 - confidence_width / 100)
-        result_df['upper_bound'] = result_df['predicted_CO2eq'] * (1 + confidence_width / 100)
+                # 使用最近sequence_length天数据预测
+                X_test = []
+                test_sequence = train_data.tail(self.sequence_length)
 
-        # 确保边界合理
-        result_df['lower_bound'] = result_df['lower_bound'].clip(lower=0)
-        result_df['upper_bound'] = result_df['upper_bound'].clip(lower=0)
+                for col in self.feature_columns:
+                    if col in test_sequence.columns and col in self.feature_scalers:
+                        col_data = test_sequence[col].values[-self.sequence_length:]
+                        scaled_data = self.feature_scalers[col].transform(col_data.reshape(-1, 1))
+                        X_test.append(scaled_data.flatten())
+
+                X_test = np.stack(X_test, axis=1)
+                X_test = X_test.reshape(1, self.sequence_length, len(self.feature_columns))
+
+                try:
+                    scaled_pred = self.model.predict(X_test, verbose=0)[0][0]
+                    prediction = self.feature_scalers[target_column].inverse_transform([[scaled_pred]])[0][0]
+                    error = abs(prediction - actual_value) / actual_value if actual_value > 0 else 0
+                    historical_errors.append(error)
+                except:
+                    continue
+
+        # 计算平均相对误差
+        if historical_errors:
+            mean_error = np.mean(historical_errors)
+            std_error = np.std(historical_errors)
+        else:
+            # 默认误差估计
+            mean_error = 0.15  # 15%的平均误差
+            std_error = 0.08  # 8%的标准差
+
+        # 置信区间考虑预测步长的增加而扩大（不确定性随时间增加）
+        confidence_factors = []
+        for i in range(steps):
+            # 不确定性随预测步长线性增加
+            uncertainty_factor = 1 + (i / steps) * 2  # 最终不确定性增加到3倍
+            confidence_factors.append(uncertainty_factor)
+
+        # 计算上下界
+        result_df['lower_bound'] = [
+            max(0, pred * (1 - mean_error * factor - std_error))
+            for pred, factor in zip(result_df['predicted_CO2eq'], confidence_factors)
+        ]
+        result_df['upper_bound'] = [
+            pred * (1 + mean_error * factor + std_error)
+            for pred, factor in zip(result_df['predicted_CO2eq'], confidence_factors)
+        ]
 
         return result_df
 
