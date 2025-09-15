@@ -360,7 +360,26 @@ class CarbonCalculator:
         df_calc = self.calculate_unit_emissions(df_calc)
 
         # 使用时间序列分析而不是简单平均
-        # 移除对statsmodels的依赖，使用pandas内置方法
+        # 确保有足够的数据
+        if len(df_calc) < 7:  # 至少需要7天数据
+            print("警告: 数据不足，使用简单平均预测")
+            daily_avg = df_calc['total_CO2eq'].mean() if 'total_CO2eq' in df_calc.columns else 1000
+            predictions = [daily_avg] * future_days
+            std_dev = df_calc['total_CO2eq'].std() if 'total_CO2eq' in df_calc.columns else daily_avg * 0.1
+            lower_bounds = [max(0, p - std_dev) for p in predictions]
+            upper_bounds = [p + std_dev for p in predictions]
+
+            # 生成预测结果
+            last_date = df_calc['日期'].max() if '日期' in df_calc.columns else pd.Timestamp.now()
+            future_dates = [last_date + timedelta(days=i) for i in range(1, future_days + 1)]
+
+            return pd.DataFrame({
+                '日期': future_dates,
+                'predicted_CO2eq': predictions,
+                'lower_bound': lower_bounds,
+                'upper_bound': upper_bounds
+            })
+
         ts_data = df_calc.set_index('日期')['total_CO2eq']
 
         # 使用pandas的rolling和expanding方法代替statsmodels
