@@ -280,11 +280,16 @@ class CarbonLSTMPredictor:
 
             # 堆叠特征序列
             try:
+                # 检查sequence_features是否为空
+                if not sequence_features:
+                    print(f"警告: 序列 {i} 没有特征数据，跳过")
+                    continue
+
                 # 检查所有序列长度是否一致
                 seq_lengths = [len(seq) for seq in sequence_features]
                 if len(set(seq_lengths)) != 1:
                     print(f"序列长度不一致 at index {i}: {seq_lengths}")
-                    continue  # 这个continue在循环内是正确的
+                    continue
 
                 # 转置以符合LSTM输入格式 [timesteps, features]
                 stacked_sequence = np.stack(sequence_features, axis=1)
@@ -294,7 +299,7 @@ class CarbonLSTMPredictor:
                 y.append(scaled_target)
             except Exception as e:
                 print(f"堆叠序列时出错: {e}")
-                continue  # 这个continue在循环内是正确的
+                continue
 
         # 检查是否有有效数据
         if len(X) == 0:
