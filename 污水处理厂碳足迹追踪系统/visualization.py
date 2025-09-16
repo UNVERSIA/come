@@ -614,6 +614,12 @@ def create_monthly_trend_chart(historical_data, selected_year=None):
 
 def create_forecast_chart(historical_data, prediction_data):
     """创建包含历史数据和未来预测的趋势图"""
+    # 检查是否是月度数据
+    is_monthly = '年月' in prediction_data.columns
+
+    if is_monthly:
+        # 使用月度图表
+        return create_monthly_forecast_chart(prediction_data)
     # 准备历史数据用于绘图（按周或月聚合以减少数据点，避免渲染缓慢）
     df_hist = historical_data.copy()
     df_hist['日期'] = pd.to_datetime(df_hist['日期'])
@@ -762,3 +768,79 @@ def create_monthly_forecast_chart(monthly_prediction):
     return fig
 
 
+def create_monthly_forecast_chart(monthly_prediction):
+    """创建月度预测图表"""
+    fig = go.Figure()
+
+    # 确保数据按日期排序
+    monthly_prediction = monthly_prediction.sort_values('日期')
+
+    # 绘制预测线
+    fig.add_trace(go.Scatter(
+        x=monthly_prediction['年月'],
+        y=monthly_prediction['predicted_CO2eq'],
+        mode='lines+markers',
+        name='月均预测',
+        line=dict(color='#FF7F0E', width=3),
+        marker=dict(size=8),
+        text=monthly_prediction['predicted_CO2eq'].round(1),
+        textposition='top center',
+        textfont=dict(color='black', size=10)
+    ))
+
+    # 添加上下界区域
+    fig.add_trace(go.Scatter(
+        x=monthly_prediction['年月'],
+        y=monthly_prediction['upper_bound'],
+        mode='lines',
+        line=dict(width=0),
+        showlegend=False,
+        hoverinfo='skip'
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=monthly_prediction['年月'],
+        y=monthly_prediction['lower_bound'],
+        mode='lines',
+        line=dict(width=0),
+        fill='tonexty',
+        fillcolor='rgba(255, 127, 14, 0.2)',
+        showlegend=False,
+        hoverinfo='skip'
+    ))
+
+    fig.update_layout(
+        title="2025年月度碳排放预测",
+        xaxis_title="月份",
+        yaxis_title="月均碳排放 (kgCO2eq)",
+        font=dict(size=14, color="black"),
+        plot_bgcolor="rgba(245, 245, 245, 1)",
+        paper_bgcolor="rgba(245, 245, 245, 1)",
+        height=500,
+        xaxis=dict(
+            tickmode='array',
+            tickvals=monthly_prediction['年月'],
+            tickangle=45,
+            tickfont=dict(color="black")
+        ),
+        yaxis=dict(
+            tickfont=dict(color="black")
+        ),
+        hovermode="x unified",
+        showlegend=True
+    )
+
+    # 添加数值标注
+    for i, row in monthly_prediction.iterrows():
+        fig.add_annotation(
+            x=row['年月'],
+            y=row['predicted_CO2eq'],
+            text=f"{row['predicted_CO2eq']:.0f}",
+            showarrow=True,
+            arrowhead=1,
+            ax=0,
+            ay=-30,
+            font=dict(color="black", size=10)
+        )
+
+    return fig
