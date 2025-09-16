@@ -1518,7 +1518,7 @@ with tab5:
 
         # 第三部分：进行预测
         st.subheader("3. 预测设置")
-        predict_col1, predict_col2, predict_col3 = st.columns([1, 1, 1])
+        predict_col1, predict_col2, predict_col3 = st.columns([1, 2, 1])
 
         with predict_col1:
             if st.button("进行预测", key="predict_btn"):
@@ -1553,7 +1553,8 @@ with tab5:
                                 }).reset_index()
 
                                 # 只保留2025年的月度数据
-                                monthly_prediction = monthly_prediction[monthly_prediction['年月'].str.startswith('2025')]
+                                monthly_prediction = monthly_prediction[
+                                    monthly_prediction['年月'].str.startswith('2025')]
 
                                 # 存储结果
                                 st.session_state.prediction_data = monthly_prediction
@@ -1611,7 +1612,7 @@ with tab5:
                     st.warning("请先加载或训练模型")
 
         with predict_col2:
-            st.info(f"预测范围: 2025年全年 (365天)")
+            st.info(f"预测范围: 2025年全年 (365天)\n\n预测结果将显示2025年全年的月度数据。")
 
         with predict_col3:
             st.info("预测结果将显示2025年全年的月度数据。")
