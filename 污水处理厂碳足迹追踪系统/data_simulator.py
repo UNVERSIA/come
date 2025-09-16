@@ -90,9 +90,9 @@ class DataSimulator:
 
     def generate_simulated_data(self, save_path="data/simulated_data.csv"):
         """生成完整的模拟数据集"""
-        # 确保生成足够长的数据（至少3年）
-        if (self.end_date - self.start_date).days < 1095:
-            self.end_date = self.start_date + timedelta(days=1095)  # 至少3年数据
+        # 修改日期范围：2018-2024年
+        self.start_date = datetime(2018, 1, 1)
+        self.end_date = datetime(2024, 12, 31)
 
         date_range = pd.date_range(self.start_date, self.end_date)
         length = len(date_range)
