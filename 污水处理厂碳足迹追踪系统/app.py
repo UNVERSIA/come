@@ -1,787 +1,1891 @@
-# lstm_predictor.py
-import numpy as np
-import pandas as pd
-import tensorflow as tf
-from tensorflow.keras.models import Sequential, load_model
-from tensorflow.keras.layers import LSTM, Dense, Dropout
-from sklearn.preprocessing import MinMaxScaler
+# app.py
 import joblib
+import plotly.express as px
+import streamlit as st
+import pandas as pd
+import re
+import numpy as np
+import math
+import time
 import os
-from datetime import timedelta
-import warnings
-import logging
+import sys
+import json
+from datetime import datetime, timedelta
+from PIL import Image
+import plotly.graph_objects as go
+from streamlit.components.v1 import html
 
-# 设置日志
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# 添加当前目录到系统路径
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-warnings.filterwarnings('ignore')
+# 导入自定义模块
+try:
+    from carbon_calculator import CarbonCalculator
+    import visualization as vis
+    from plant_diagram import PlantDiagramEngine
+    from lstm_predictor import CarbonLSTMPredictor
+    from factor_database import CarbonFactorDatabase
+    from optimization_engine import OptimizationEngine
+    from data_simulator import DataSimulator
+except ImportError as e:
+    st.error(f"导入模块错误: {e}")
+    st.info("请确保所有依赖文件都在同一目录下")
+    st.stop()
 
-from carbon_calculator import CarbonCalculator
+# 页面配置
+st.set_page_config(page_title="污水处理厂碳足迹追踪系统", layout="wide", page_icon="🌍")
+st.title("基于碳核算-碳账户模型的污水处理厂碳足迹追踪与评估系统")
+st.markdown("### 第七届全国大学生市政环境AI＋创新实践能力大赛-产业赛道项目")
 
 
-class CarbonLSTMPredictor:
-    def __init__(self, sequence_length=30, forecast_days=7):
-        self.sequence_length = sequence_length
-        self.forecast_days = forecast_days
-        self.model = None
-        self.scaler = MinMaxScaler()
-        self.feature_scalers = {}
-        self.feature_columns = [
-            '处理水量(m³)', '电耗(kWh)', 'PAC投加量(kg)',
-            'PAM投加量(kg)', '次氯酸钠投加量(kg)',
-            '进水COD(mg/L)', '出水COD(mg/L)', '进水TN(mg/L)', '出水TN(mg/L)'
-        ]
-        self.start_date = pd.Timestamp('2020-01-01')  # 添加默认起始日期
-        self.end_date = pd.Timestamp('2022-12-31')  # 添加默认结束日期
-
-    def generate_simulated_data(self, save_path="data/simulated_data.csv"):
-        """生成完整的模拟数据集"""
-        # 确保生成足够长的数据（至少2年）
-        if (self.end_date - self.start_date).days < 730:
-            self.end_date = self.start_date + timedelta(days=730)  # 至少2年数据
-
-        date_range = pd.date_range(self.start_date, self.end_date)
-        length = len(date_range)
-
-        # 生成各指标数据
-        water_flow = self.generate_water_flow(length)
-        energy_consumption = self.generate_energy_consumption(water_flow, length)
-        pac_usage, pam_usage, naclo_usage = self.generate_chemical_usage(water_flow, length)
-        cod_in, cod_out, tn_in, tn_out = self.generate_water_quality(length)
-
-        # 构建DataFrame
-        data = {
-            "日期": date_range,
-            "处理水量(m³)": np.round(water_flow),
-            "电耗(kWh)": np.round(energy_consumption),
-            "PAC投加量(kg)": np.round(pac_usage),
-            "PAM投加量(kg)": np.round(pam_usage),
-            "次氯酸钠投加量(kg)": np.round(naclo_usage),
-            "进水COD(mg/L)": np.round(cod_in, 1),
-            "出水COD(mg/L)": np.round(cod_out, 1),
-            "进水TN(mg/L)": np.round(tn_in, 1),
-            "出水TN(mg/L)": np.round(tn_out, 1)
+# 初始化session_state
+def initialize_session_state():
+    """初始化所有session_state变量"""
+    if 'df' not in st.session_state:
+        st.session_state.df = None
+    if 'df_calc' not in st.session_state:
+        st.session_state.df_calc = None
+    if 'selected_month' not in st.session_state:
+        st.session_state.selected_month = None
+    if 'unit_data' not in st.session_state:
+        st.session_state.unit_data = {
+            "粗格栅": {"water_flow": 10000.0, "energy": 1500.0, "emission": 450.0, "enabled": True},
+            "提升泵房": {"water_flow": 10000.0, "energy": 3500.0, "emission": 1050.0, "enabled": True},
+            "细格栅": {"water_flow": 10000.0, "energy": 800.0, "emission": 240.0, "enabled": True},
+            "曝气沉砂池": {"water_flow": 10000.0, "energy": 1200.0, "emission": 360.0, "enabled": True},
+            "膜格栅": {"water_flow": 10000.0, "energy": 1000.0, "emission": 300.0, "enabled": True},
+            "厌氧池": {"water_flow": 10000.0, "energy": 3000.0, "TN_in": 40.0, "TN_out": 30.0, "COD_in": 200.0,
+                       "COD_out": 180.0, "emission": 1200.0, "enabled": True},
+            "缺氧池": {"water_flow": 10000.0, "energy": 3500.0, "TN_in": 30.0, "TN_out": 20.0, "COD_in": 180.0,
+                       "COD_out": 100.0, "emission": 1500.0, "enabled": True},
+            "好氧池": {"water_flow": 10000.0, "energy": 5000.0, "TN_in": 20.0, "TN_out": 15.0, "COD_in": 100.0,
+                       "COD_out": 50.0, "emission": 1800.0, "enabled": True},
+            "MBR膜池": {"water_flow": 10000.0, "energy": 4000.0, "emission": 1200.0, "enabled": True},
+            "污泥处理车间": {"water_flow": 500.0, "energy": 2000.0, "PAM": 100.0, "emission": 800.0, "enabled": True},
+            "DF系统": {"water_flow": 10000.0, "energy": 2500.0, "PAC": 300.0, "emission": 1000.0, "enabled": True},
+            "催化氧化": {"water_flow": 10000.0, "energy": 1800.0, "emission": 700.0, "enabled": True},
+            "鼓风机房": {"water_flow": 0.0, "energy": 2500.0, "emission": 900.0, "enabled": True},
+            "消毒接触池": {"water_flow": 10000.0, "energy": 1000.0, "emission": 400.0, "enabled": True},
+            "除臭系统": {"water_flow": 0.0, "energy": 1800.0, "emission": 600.0, "enabled": True}
         }
+    if 'custom_calculations' not in st.session_state:
+        st.session_state.custom_calculations = {}
+    if 'emission_data' not in st.session_state:
+        st.session_state.emission_data = {}
+    if 'df_selected' not in st.session_state:
+        st.session_state.df_selected = None
+    if 'selected_unit' not in st.session_state:
+        st.session_state.selected_unit = "粗格栅"
+    if 'animation_active' not in st.session_state:
+        st.session_state.animation_active = True
+    if 'formula_results' not in st.session_state:
+        st.session_state.formula_results = {}
+    if 'flow_position' not in st.session_state:
+        st.session_state.flow_position = 0
+    if 'water_quality' not in st.session_state:
+        st.session_state.water_quality = {
+            "COD": {"in": 200, "out": 50},
+            "TN": {"in": 40, "out": 15},
+            "SS": {"in": 150, "out": 10},
+            "flow_rate": 10000
+        }
+    if 'last_clicked_unit' not in st.session_state:
+        st.session_state.last_clicked_unit = None
+    if 'unit_details' not in st.session_state:
+        st.session_state.unit_details = {}
+    if 'flow_data' not in st.session_state:
+        st.session_state.flow_data = {
+            "flow_rate": 10000,
+            "direction": "right"
+        }
+    if 'unit_status' not in st.session_state:
+        st.session_state.unit_status = {unit: "运行中" for unit in st.session_state.unit_data.keys()}
+    if 'lstm_predictor' not in st.session_state:
+        st.session_state.lstm_predictor = None
 
-        df = pd.DataFrame(data)
-
-        # 保存到文件
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        df.to_csv(save_path, index=False, encoding='utf-8')
-        print(f"模拟数据已生成并保存到 {save_path}，共 {len(df)} 条记录")
-
-        return df
-
-    def generate_water_flow(self, length):
-        """生成处理水量数据"""
-        # 基础水量 + 季节性波动 + 随机噪声
-        base_flow = 50000
-        seasonal = 5000 * np.sin(np.arange(length) * 2 * np.pi / 365)
-        noise = np.random.normal(0, 1000, length)
-        return base_flow + seasonal + noise
-
-    def generate_energy_consumption(self, water_flow, length):
-        """生成电耗数据"""
-        # 与处理水量正相关，但有基础能耗
-        base_energy = 5000
-        flow_factor = 0.1
-        noise = np.random.normal(0, 200, length)
-        return base_energy + flow_factor * water_flow + noise
-
-    def generate_chemical_usage(self, water_flow, length):
-        """生成化学品投加量数据"""
-        # 与处理水量正相关
-        pac_factor = 0.01
-        pam_factor = 0.002
-        naclo_factor = 0.005
-
-        pac_usage = pac_factor * water_flow + np.random.normal(0, 10, length)
-        pam_usage = pam_factor * water_flow + np.random.normal(0, 5, length)
-        naclo_usage = naclo_factor * water_flow + np.random.normal(0, 8, length)
-
-        return pac_usage, pam_usage, naclo_usage
-
-    def generate_water_quality(self, length):
-        """生成水质数据"""
-        # 进水COD - 有季节性变化
-        cod_in_base = 300
-        cod_in_seasonal = 100 * np.sin(np.arange(length) * 2 * np.pi / 365 + np.pi / 4)
-        cod_in_noise = np.random.normal(0, 20, length)
-        cod_in = cod_in_base + cod_in_seasonal + cod_in_noise
-
-        # 出水COD - 与进水相关但更稳定
-        removal_efficiency = 0.85 + np.random.normal(0, 0.05, length)
-        cod_out = cod_in * (1 - removal_efficiency)
-
-        # 进水TN
-        tn_in_base = 40
-        tn_in_seasonal = 10 * np.sin(np.arange(length) * 2 * np.pi / 365 + np.pi / 3)
-        tn_in_noise = np.random.normal(0, 5, length)
-        tn_in = tn_in_base + tn_in_seasonal + tn_in_noise
-
-        # 出水TN
-        tn_removal = 0.7 + np.random.normal(0, 0.1, length)
-        tn_out = tn_in * (1 - tn_removal)
-
-        return cod_in, cod_out, tn_in, tn_out
-
-    def build_model(self, input_shape):
-        """构建LSTM模型 - 使用更兼容的方式"""
-        model = Sequential([
-            LSTM(50, return_sequences=True, input_shape=input_shape),
-            Dropout(0.2),
-            LSTM(50, return_sequences=False),
-            Dropout(0.2),
-            Dense(25),
-            Dense(1)
-        ])
-
-        model.compile(optimizer='adam', loss='mse', metrics=['mae'])
-        return model
-
-    def train(self, df, target_column='total_CO2eq', epochs=50, batch_size=32,
-              save_path='models/carbon_lstm.keras'):
-        """训练模型"""
-        # 确保目录存在
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-
-        # 准备数据
-        X, y = self.prepare_training_data(df, target_column)
-
-        if len(X) == 0:
-            raise ValueError("没有足够的数据来训练模型")
-
-        # 构建并训练模型
-        self.model = self.build_model((X.shape[1], X.shape[2]))
-        history = self.model.fit(X, y, epochs=epochs, batch_size=batch_size,
-                                 validation_split=0.2, verbose=1)
-
-        # 保存模型和缩放器 - 使用新的Keras格式
-        self.model.save(save_path)
-
-        # 同时保存权重和架构以便兼容性
-        self.model.save_weights(save_path.replace('.keras', '.weights.h5'))
-        model_json = self.model.to_json()
-        with open(save_path.replace('.keras', '_architecture.json'), 'w') as json_file:
-            json_file.write(model_json)
-
-        joblib.dump({
-            'feature_scalers': self.feature_scalers,
-            'sequence_length': self.sequence_length,
-            'forecast_days': self.forecast_days,
-            'feature_columns': self.feature_columns
-        }, save_path.replace('.keras', '_metadata.pkl'))
-
-        return history
-
-    def prepare_training_data(self, df, target_column):
-        """准备训练数据 - 修复版"""
-        # 确保数据按日期排序
-        df = df.sort_values('日期').reset_index(drop=True)
-
-        # 检查目标列是否存在且有有效数据
-        if target_column not in df.columns or df[target_column].isna().all():
-            raise ValueError(f"目标列 '{target_column}' 不存在或全部为NaN值")
-
-        # 检查是否有足够的数据
-        if len(df) < self.sequence_length * 2:
-            raise ValueError(f"需要至少 {self.sequence_length * 2} 条记录进行训练，当前只有 {len(df)} 条")
-
-        # 确保所有必需的特征列都存在，如果不存在则创建并填充默认值
-        for col in self.feature_columns:
-            if col not in df.columns:
-                print(f"警告: 特征列 '{col}' 不存在，将使用默认值填充")
-                if col == '处理水量(m³)':
-                    df[col] = 10000  # 默认处理水量
-                elif col == '电耗(kWh)':
-                    df[col] = 3000  # 默认电耗
-                elif col in ['PAC投加量(kg)', 'PAM投加量(kg)', '次氯酸钠投加量(kg)']:
-                    df[col] = 0  # 默认药剂投加量
-                elif col in ['进水COD(mg/L)', '出水COD(mg/L)', '进水TN(mg/L)', '出水TN(mg/L)']:
-                    # 根据典型污水处理厂水质设置默认值
-                    if col == '进水COD(mg/L)':
-                        df[col] = 200
-                    elif col == '出水COD(mg/L)':
-                        df[col] = 50
-                    elif col == '进水TN(mg/L)':
-                        df[col] = 40
-                    elif col == '出水TN(mg/L)':
-                        df[col] = 15
-
-        # 初始化特征数据列表
-        X, y = [], []
-
-        # 为每个特征创建单独的缩放器
-        self.feature_scalers = {}
-        valid_features = []
-
-        # 只处理实际存在的特征列
-        for col in self.feature_columns:
-            if col in df.columns and not df[col].isna().all():
-                self.feature_scalers[col] = MinMaxScaler()
-                # 只使用非NaN值进行拟合
-                valid_values = df[col].dropna().values.reshape(-1, 1)
-                if len(valid_values) > 0:
-                    self.feature_scalers[col].fit(valid_values)
-                    valid_features.append(col)
-            else:
-                print(f"警告: 特征列 '{col}' 不存在或全部为NaN值，将跳过")
-
-        # 如果没有有效特征，抛出错误
-        if not valid_features:
-            raise ValueError("没有有效的特征列可用于训练")
-
-        # 目标变量缩放器
-        self.target_scaler = MinMaxScaler()
-        target_values = df[target_column].dropna().values.reshape(-1, 1)
-        if len(target_values) > 0:
-            self.target_scaler.fit(target_values)
-        else:
-            raise ValueError(f"目标列 '{target_column}' 没有有效值")
-
-        # 创建序列数据
-        valid_count = 0
-        for i in range(self.sequence_length, len(df)):
-            # 检查目标值是否有效
-            target = df[target_column].iloc[i]
-            if np.isnan(target):
-                continue
-
-            # 提取特征序列
-            sequence_features = []
-            has_valid_data = False
-
-            for col in valid_features:
-                # 获取当前特征序列
-                col_data = df[col].iloc[i - self.sequence_length:i].values
-
-                # 检查是否有NaN值，如果有则使用均值填充
-                if np.isnan(col_data).any():
-                    col_mean = np.nanmean(col_data)
-                    if np.isnan(col_mean):  # 如果均值也是NaN，使用0
-                        col_mean = 0
-                    col_data = np.where(np.isnan(col_data), col_mean, col_data)
-
-                # 确保所有值都是有效的
-                if np.isnan(col_data).any() or len(col_data) != self.sequence_length:
-                    # 如果数据无效，使用0填充整个序列
-                    col_data = np.zeros(self.sequence_length)
-                else:
-                    has_valid_data = True
-
-                # 缩放特征数据
-                try:
-                    scaled_data = self.feature_scalers[col].transform(col_data.reshape(-1, 1))
-                    sequence_features.append(scaled_data.flatten())
-                except Exception as e:
-                    print(f"缩放特征 {col} 时出错: {e}")
-                    # 如果缩放失败，使用0填充
-                    scaled_data = np.zeros((len(col_data), 1))
-                    sequence_features.append(scaled_data.flatten())
-
-            # 如果没有有效数据，跳过该序列
-            if not has_valid_data:
-                continue
-
-            # 确保所有特征序列长度一致
-            if not all(len(seq) == self.sequence_length for seq in sequence_features):
-                continue
-
-            # 缩放目标值
-            try:
-                scaled_target = self.target_scaler.transform([[target]])[0][0]
-            except Exception as e:
-                print(f"缩放目标值时出错: {e}")
-                continue
-
-            # 堆叠特征序列
-            try:
-                stacked_sequence = np.stack(sequence_features, axis=1)
-
-                # 添加到数据集
-                X.append(stacked_sequence)
-                y.append(scaled_target)
-                valid_count += 1
-            except Exception as e:
-                print(f"堆叠序列时出错: {e}")
-                continue
-
-        # 检查是否有有效数据
-        if valid_count == 0:
-            raise ValueError("没有有效的训练序列")
-
-        print(f"成功创建 {valid_count} 个有效训练序列")
-
-        return np.array(X), np.array(y)
-
-    def load_model(self, model_path='models/carbon_lstm.keras'):
-        """加载预训练模型"""
-        # 添加路径前缀
-        if not model_path.startswith('./污水处理厂碳足迹追踪系统/'):
-            model_path = f'./污水处理厂碳足迹追踪系统/{model_path}'
-
-        # 检查文件是否存在
-        if not os.path.exists(model_path):
-            # 尝试不带前缀的路径
-            alt_path = model_path.replace('./污水处理厂碳足迹追踪系统/', '')
-            if os.path.exists(alt_path):
-                model_path = alt_path
-
-        # 检查模型文件是否存在
-        if not os.path.exists(model_path):
-            # 尝试加载.h5格式的旧模型（兼容性）
-            h5_path = model_path.replace('.keras', '.h5')
-            if os.path.exists(h5_path):
-                model_path = h5_path
-            else:
-                # 如果都没有找到，尝试其他可能的路径
-                possible_paths = [
-                    model_path,
-                    h5_path,
-                    model_path.replace('.keras', '.weights.h5'),
-                    'models/carbon_lstm.h5',
-                    'models/carbon_lstm.weights.h5'
-                ]
-
-                found = False
-                for path in possible_paths:
-                    if os.path.exists(path):
-                        model_path = path
-                        found = True
-                        break
-
-                if not found:
-                    raise FileNotFoundError(f"模型文件不存在，尝试了以下路径: {possible_paths}")
-
-        metadata_path = model_path.replace('.keras', '_metadata.pkl').replace('.h5', '_metadata.pkl')
-        if not os.path.exists(metadata_path):
-            # 尝试其他可能的元数据路径
-            possible_meta_paths = [
-                metadata_path,
-                'models/carbon_lstm_metadata.pkl',
-                model_path.replace('.keras', '.pkl').replace('.h5', '.pkl')
-            ]
-
-            found_meta = False
-            for path in possible_meta_paths:
-                if os.path.exists(path):
-                    metadata_path = path
-                    found_meta = True
-                    break
-
-            if not found_meta:
-                raise FileNotFoundError(f"元数据文件不存在，尝试了以下路径: {possible_meta_paths}")
-
-        # 先加载元数据
+    # 修复因子数据库初始化问题
+    if 'factor_db' not in st.session_state:
         try:
-            metadata = joblib.load(metadata_path)
-            self.feature_scalers = metadata['feature_scalers']
-            self.sequence_length = metadata['sequence_length']
-            self.forecast_days = metadata['forecast_days']
-            self.feature_columns = metadata['feature_columns']
+            # 确保目录存在
+            os.makedirs("data", exist_ok=True)
+            # 直接导入并初始化 CarbonFactorDatabase
+            from factor_database import CarbonFactorDatabase
+            st.session_state.factor_db = CarbonFactorDatabase()
+            # 检查是否是回退模式
+            if hasattr(st.session_state.factor_db, 'is_fallback') and st.session_state.factor_db.is_fallback:
+                st.warning("⚠️ 当前处于回退模式，使用默认因子值。某些功能可能受限。")
         except Exception as e:
-            logger.warning(f"加载元数据失败: {str(e)}")
-            # 设置默认值
-            self.sequence_length = 30
-            self.forecast_days = 7
-            self.feature_columns = [
-                '处理水量(m³)', '电耗(kWh)', 'PAC投加量(kg)',
-                'PAM投加量(kg)', '次氯酸钠投加量(kg)',
-                '进水COD(mg/L)', '出水COD(mg/L)', '进水TN(mg/L)', '出水TN(mg/L)'
-            ]
+            st.error(f"初始化碳因子数据库失败: {e}")
 
-        try:
-            # 尝试直接加载模型
-            self.model = load_model(model_path)
-            logger.info("模型加载成功")
-        except Exception as e:
-            # 如果直接加载失败，尝试使用权重和架构
-            try:
-                logger.warning(f"模型加载遇到兼容性问题: {str(e)}")
-                logger.info("尝试使用备用加载方式...")
+            # 创建一个完整的回退数据库实例
+            class FallbackCarbonFactorDatabase:
+                def __init__(self):
+                    self.is_fallback = True
 
-                # 尝试加载架构和权重
-                architecture_path = model_path.replace('.keras', '_architecture.json').replace('.h5',
-                                                                                               '_architecture.json')
-                weights_path = model_path.replace('.keras', '.weights.h5').replace('.h5', '.weights.h5')
+                def get_factor(self, factor_type, region="中国", date=None):
+                    # 默认因子值 - 使用提供的最新数据
+                    factors = {
+                        "电力": 0.5568 if date and "2022" in date else 0.5366,
+                        "PAC": 1.62,
+                        "PAM": 1.5,
+                        "次氯酸钠": 0.92,
+                        "臭氧": 0.8,
+                        "N2O": 273,
+                        "CH4": 27.9,
+                        "沼气发电": 2.5,
+                        "光伏发电": 0.85,
+                        "热泵技术": 1.2,
+                        "污泥资源化": 0.3
+                    }
+                    return factors.get(factor_type, 0.0)
 
-                # 如果权重文件不存在，尝试其他可能的路径
-                if not os.path.exists(weights_path):
-                    possible_weights = [
-                        weights_path,
-                        model_path.replace('.keras', '.h5').replace('.h5', '.h5'),
-                        'models/carbon_lstm.weights.h5',
-                        'models/carbon_lstm.h5'
+                def get_factor_history(self, factor_type, region="中国", start_date=None, end_date=None):
+                    # 返回空的DataFrame
+                    return pd.DataFrame(columns=['factor_type', 'factor_value', 'unit', 'region',
+                                                 'effective_date', 'expiry_date', 'data_source', 'description'])
+
+                def update_factor(self, factor_type, factor_value, unit, region, effective_date,
+                                  expiry_date=None, data_source="用户输入", description="",
+                                  change_reason="手动更新"):
+                    st.warning("回退模式下无法更新因子")
+
+                def fetch_latest_electricity_factor(self, region="中国"):
+                    return None, None
+
+                def get_regional_factors(self, factor_type, date=None):
+                    return {}
+
+                def export_factors(self, export_path, format="csv"):
+                    # 创建默认因子数据
+                    default_factors = [
+                        ("电力", 0.5366, "kgCO2/kWh", "中国", "2021-01-01", "2021-12-31", "生态环境部公告2024年第12号",
+                         "2021年全国电力平均二氧化碳排放因子"),
+                        ("电力", 0.5568, "kgCO2/kWh", "中国", "2022-01-01", "2022-12-31", "生态环境部公告2024年第33号",
+                         "2022年全国电力平均二氧化碳排放因子"),
+                        ("CH4", 27.9, "kgCO2/kgCH4", "通用", "2020-01-01", None, "IPCC AR6", "甲烷全球变暖潜能值(GWP)"),
+                        ("N2O", 273, "kgCO2/kgN2O", "通用", "2020-01-01", None, "IPCC AR6",
+                         "氧化亚氮全球变暖潜能值(GWP)"),
+                        ("PAC", 1.62, "kgCO2/kg", "通用", "2020-01-01", None, "T/CAEPI 49-2022", "聚合氯化铝排放因子"),
+                        ("PAM", 1.5, "kgCO2/kg", "通用", "2020-01-01", None, "T/CAEPI 49-2022", "聚丙烯酰胺排放因子"),
+                        ("次氯酸钠", 0.92, "kgCO2/kg", "通用", "2020-01-01", None, "T/CAEPI 49-2022",
+                         "次氯酸钠排放因子"),
+                        ("臭氧", 0.8, "kgCO2/kg", "通用", "2020-01-01", None, "研究文献", "臭氧排放因子"),
+                        ("沼气发电", 2.5, "kgCO2eq/kWh", "通用", "2020-01-01", None, "研究文献",
+                         "沼气发电碳抵消因子"),
+                        ("光伏发电", 0.85, "kgCO2eq/kWh", "通用", "2020-01-01", None, "研究文献",
+                         "光伏发电碳抵消因子"),
+                        ("热泵技术", 1.2, "kgCO2eq/kWh", "通用", "2020-01-01", None, "研究文献",
+                         "热泵技术碳抵消因子"),
+                        ("污泥资源化", 0.3, "kgCO2eq/kgDS", "通用", "2020-01-01", None, "研究文献",
+                         "污泥资源化碳抵消因子")
                     ]
 
-                    for path in possible_weights:
-                        if os.path.exists(path):
-                            weights_path = path
-                            break
+                    df = pd.DataFrame(default_factors, columns=[
+                        'factor_type', 'factor_value', 'unit', 'region',
+                        'effective_date', 'expiry_date', 'data_source', 'description'
+                    ])
 
-                if os.path.exists(architecture_path) and os.path.exists(weights_path):
-                    # 从JSON加载模型架构
-                    from tensorflow.keras.models import model_from_json
-                    with open(architecture_path, 'r') as json_file:
-                        model_json = json_file.read()
-                    self.model = model_from_json(model_json)
+                    if format.lower() == "csv":
+                        df.to_csv(export_path, index=False, encoding='utf-8-sig')
+                    elif format.lower() == "excel":
+                        df.to_excel(export_path, index=False)
 
-                    # 加载权重
-                    self.model.load_weights(weights_path)
+                    return df
 
-                    # 编译模型
-                    self.model.compile(optimizer='adam', loss='mse', metrics=['mae'])
-                    logger.info("使用备用方式加载模型成功!")
+            st.session_state.factor_db = FallbackCarbonFactorDatabase()
+            st.warning("⚠️ 当前处于回退模式，使用默认因子值。某些功能可能受限。")
+
+    if 'optimization_engine' not in st.session_state:
+        st.session_state.optimization_engine = None
+    if 'tech_comparison_data' not in st.session_state:
+        st.session_state.tech_comparison_data = pd.DataFrame({
+            '技术名称': ['厌氧消化产沼', '光伏发电', '高效曝气', '热泵技术', '污泥干化'],
+            '减排量_kgCO2eq': [15000, 8000, 6000, 4500, 3000],
+            '投资成本_万元': [500, 300, 200, 150, 100],
+            '回收期_年': [5, 8, 4, 6, 7],
+            '适用性': ['高', '中', '高', '中', '低'],
+            '碳减排贡献率_%': [25, 15, 20, 12, 8],
+            '能源中和率_%': [30, 40, 10, 15, 5]
+        })
+    if 'component_value' not in st.session_state:
+        st.session_state.component_value = None
+    if 'carbon_offset_data' not in st.session_state:
+        st.session_state.carbon_offset_data = {
+            "沼气发电": 0,
+            "光伏发电": 0,
+            "热泵技术": 0,
+            "污泥资源化": 0
+        }
+    if 'optimization_scenarios' not in st.session_state:
+        st.session_state.optimization_scenarios = {
+            "基准情景": {"aeration_adjust": 0, "pac_adjust": 0, "sludge_ratio": 0.5},
+            "节能情景": {"aeration_adjust": -15, "pac_adjust": -10, "sludge_ratio": 0.6},
+            "减排情景": {"aeration_adjust": -20, "pac_adjust": -20, "sludge_ratio": 0.7}
+        }
+    if 'selected_scenario' not in st.session_state:
+        st.session_state.selected_scenario = "基准情景"
+
+    if 'lstm_predictor' not in st.session_state:
+        st.session_state.lstm_predictor = None
+    if 'optimization_engine' not in st.session_state:
+        st.session_state.optimization_engine = None
+    if 'tech_comparison_data' not in st.session_state:
+        st.session_state.tech_comparison_data = pd.DataFrame({
+            '技术名称': ['厌氧消化产沼', '光伏发电', '高效曝气', '热泵技术', '污泥干化'],
+            '减排量_kgCO2eq': [15000, 8000, 6000, 4500, 3000],
+            '投资成本_万元': [500, 300, 200, 150, 100],
+            '回收期_年': [5, 8, 4, 6, 7],
+            '适用性': ['高', '中', '高', '中', '低'],
+            '碳减排贡献率_%': [25, 15, 20, 12, 8],
+            '能源中和率_%': [30, 40, 10, 15, 5]
+        })
+    if 'prediction_made' not in st.session_state:
+        st.session_state.prediction_made = False
+
+    if 'historical_data' not in st.session_state:
+        st.session_state.historical_data = pd.DataFrame()
+    if 'prediction_data' not in st.session_state:
+        st.session_state.prediction_data = pd.DataFrame()
+    if 'prediction_made' not in st.session_state:
+        st.session_state.prediction_made = False
+
+
+# 初始化session state
+initialize_session_state()
+
+
+# 工艺流程图HTML组件
+def create_plant_diagram(selected_unit=None, flow_position=0, flow_rate=10000, animation_active=True):
+    # 创建动态水流效果
+    flow_animation = "animation: flow 10s linear infinite;" if animation_active else ""
+
+    # 创建工艺流程图HTML
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>污水处理厂工艺流程</title>
+        <style>
+            .plant-container {{
+                position: relative;
+                width: 100%;
+                height: 900px;
+                background-color: #e6f7ff;
+                border: 2px solid #0078D7;
+                border-radius: 10px;
+                overflow: hidden;
+                font-family: Arial, sans-serif;
+            }}
+
+            .unit {{
+                position: absolute;
+                border: 2px solid #2c3e50;
+                border-radius: 8px;
+                padding: 10px;
+                text-align: center;
+                cursor: pointer;
+                transition: all 0.3s;
+                font-weight: bold;
+                color: white;
+                display: flex;
+                flex-direction: column;
+                justify-content: center;
+                align-items: center;
+                z-index: 10;
+            }}
+
+            .unit:hover {{
+                transform: scale(1.05);
+                box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+                z-index: 20;
+            }}
+
+            .unit.active {{
+                border: 3px solid #FFD700;
+                box-shadow: 0 0 10px #FFD700;
+            }}
+
+            .unit.disabled {{
+                background-color: #cccccc !important;
+                opacity: 0.7;
+            }}
+
+            .unit-name {{
+                font-size: 15px;
+                margin-bottom: 5px;
+                text-shadow: 1px 1px 2px rgba(0,0,0,0.7);
+            }}
+
+            .unit-status {{
+                font-size: 12px;
+                padding: 2px 5px;
+                border-radius: 3px;
+                background-color: rgba(255,255,255,0.2);
+            }}
+
+            .pre-treatment {{ background-color: #3498db; }}
+            .bio-treatment {{ background-color: #2ecc71; }}
+            .advanced-treatment {{ background-color: #e74c3c; }}
+            .sludge-treatment {{ background-color: #f39c12; }}
+            .auxiliary {{ background-color: #9b59b6; }}
+            .effluent-area {{ background-color: #1abc9c; }}
+
+            .flow-line {{
+                position: absolute;
+                background-color: #1e90ff;
+                z-index: 5;
+            }}
+
+            .water-flow {{
+                position: absolute;
+                background: linear-gradient(90deg, transparent, rgba(30, 144, 255, 0.8), transparent);
+                {flow_animation}
+                z-index: 6;
+                border-radius: 3px;
+            }}
+
+            .gas-flow {{
+                position: absolute;
+                background: linear-gradient(90deg, transparent, rgba(169, 169, 169, 0.8), transparent);
+                {flow_animation}
+                z-index: 6;
+                border-radius: 3px;
+            }}
+
+            .sludge-flow {{
+                position: absolute;
+                background: linear-gradient(90deg, transparent, rgba(139, 69, 19, 0.8), transparent);
+                {flow_animation}
+                z-index: 6;
+                border-radius: 3px;
+            }}
+
+            .air-flow {{
+                position: absolute;
+                background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
+                {flow_animation}
+                z-index: 6;
+                border-radius: 3px;
+            }}
+
+            .flow-arrow {{
+                position: absolute;
+                width: 0;
+                height: 0;
+                border-style: solid;
+                z-index: 7;
+            }}
+
+            .flow-label {{
+                position: absolute;
+                font-size: 13px;
+                background: rgba(255, 255, 255, 0.7);
+                padding: 2px 5px;
+                border-radius: 3px;
+                z-index: 8;
+            }}
+
+            .special-flow-label {{
+                position: absolute;
+                color: black;
+                font-size: 15px;
+                background:none;
+            }}
+
+            .particle {{
+                position: absolute;
+                width: 4px;
+                height: 4px;
+                border-radius: 50%;
+                background-color: #1e90ff;
+                z-index: 9;
+                opacity: 0.7;
+            }}
+
+            .sludge-particle {{
+                background-color: #8B4513;
+            }}
+
+            .gas-particle {{
+                background-color: #A9A9A9;
+            }}
+
+            .waste-particle {{
+                background-color: #FF6347;
+            }}
+
+            .air-particle {{
+                background-color: #FFFFFF;
+            }}
+
+            .info-panel {{
+                position: absolute;
+                bottom: 10px;
+                left: 10px;
+                background-color: rgba(255, 255, 255, 0.9);
+                padding: 10px;
+                border-radius: 5px;
+                border: 1px solid #ccc;
+                z-index: 100;
+                font-size: 12px;
+                max-width: 250px;
+            }}
+
+            .bio-deodorization {{
+                position: absolute;
+                text-align: center;
+                font-weight: bold;
+                color: #333;
+                z-index: 10;
+            }}
+
+            /* 区域标注样式 */
+            .region-box {{
+                position: absolute;
+                border: 3px solid;
+                border-radius: 10px;
+                z-index: 3;
+                opacity: 0.3;
+            }}
+
+            .region-label {{
+                position: absolute;
+                font-weight: bold;
+                font-size: 16px;
+                color: black;
+                text-shadow: 1px 1px 2px white;
+                z-index: 4;
+            }}
+
+            .region-pre-treatment {{
+                background-color: rgba(52, 152, 219, 0.3);
+                border-color: #3498db;
+            }}
+
+            .region-bio-treatment {{
+                background-color: rgba(46, 204, 113, 0.3);
+                border-color: #2ecc71;
+            }}
+
+            .region-advanced-treatment {{
+                background-color: rgba(231, 76, 60, 0.3);
+                border-color: #e74c3c;
+            }}
+
+            .region-sludge-treatment {{
+                background-color: rgba(243, 156, 18, 0.3);
+                border-color: #f39c12;
+            }}
+
+            .region-effluent-area {{
+                background-color: rgba(26, 188, 156, 0.3);
+                border-color: #1abc9c;
+            }}
+
+            @keyframes flow {{
+                0% {{ background-position: -100% 0; }}
+                100% {{ background-position: 200% 0; }}
+            }}
+
+            @keyframes moveParticle {{
+                0% {{ transform: translateX(0); }}
+                100% {{ transform: translateX(50px); }}
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="plant-container">
+            <!-- 区域标注框 -->
+            <!-- 预处理区 -->
+            <div class="region-box region-pre-treatment" style="top: 126px; left: 110px; width: 783px; height: 142px;"></div>
+            <div class="region-label" style="top: 133px; left: 120px;">预处理区</div>
+
+            <!-- 生物处理区 -->
+            <div class="region-box region-bio-treatment" style="top: 400px; left: 490px; width: 415px; height: 140px;"></div>
+            <div class="region-label" style="top: 405px; left: 500px;">生物处理区</div>
+
+            <!-- 深度处理区 -->
+            <div class="region-box region-advanced-treatment" style="top: 620px; left: 500px; width: 370px; height: 140px;"></div>
+            <div class="region-label" style="top: 735px; left: 520px;">深度处理区</div>
+
+            <!-- 泥处理区 -->
+            <div class="region-box region-sludge-treatment" style="top: 400px; left: 270px; width: 170px; height: 200px;"></div>
+            <div class="region-label" style="top: 405px; left: 280px;">泥处理区</div>
+
+            <!-- 出水区 -->
+            <div class="region-box region-effluent-area" style="top: 640px; left: 180px; width: 250px; height: 100px;"></div>
+            <div class="region-label" style="top: 650px; left: 190px;">出水区</div>
+
+            <!-- 新增除臭系统区域标注框 -->
+            <div class="region-box region-effluent-area" style="top: 282px; left: 26px; width: 135px; height: 160px;"></div>
+            <div class="region-label" style="top: 286px; left: 35px;">出水区</div>
+
+            <!-- 工艺单元 -->
+            <!-- 第一行：预处理区 -->
+            <div class="unit pre-treatment {'disabled' if not st.session_state.unit_data['粗格栅']['enabled'] else ''}" style="top: 160px; left: 150px; width: 90px; height: 60px;" onclick="selectUnit('粗格栅')">
+                <div class="unit-name">粗格栅</div>
+                <div class="unit-status">{st.session_state.unit_status['粗格栅']}</div>
+            </div>
+
+            <div class="unit pre-treatment {'disabled' if not st.session_state.unit_data['提升泵房']['enabled'] else ''}" style="top: 160px; left: 300px; width: 90px; height: 60px;" onclick="selectUnit('提升泵房')">
+                <div class="unit-name">提升泵房</div>
+                <div class="unit-status">{st.session_state.unit_status['提升泵房']}</div>
+            </div>
+
+            <div class="unit pre-treatment {'disabled' if not st.session_state.unit_data['细格栅']['enabled'] else ''}" style="top: 160px; left: 450px; width: 90px; height: 60px;" onclick="selectUnit('细格栅')">
+                <div class="unit-name">细格栅</div>
+                <div class="unit-status">{st.session_state.unit_status['细格栅']}</div>
+            </div>
+
+            <div class="unit pre-treatment {'disabled' if not st.session_state.unit_data['曝气沉砂池']['enabled'] else ''}" style="top: 160px; left: 600px; width: 90px; height: 60px;" onclick="selectUnit('曝气沉砂池')">
+                <div class="unit-name">曝气沉砂池</div>
+                <div class="unit-status">{st.session_state.unit_status['曝气沉砂池']}</div>
+            </div>
+
+            <div class="unit pre-treatment {'disabled' if not st.session_state.unit_data['膜格栅']['enabled'] else ''}" style="top: 160px; left: 750px; width: 90px; height: 60px;" onclick="selectUnit('膜格栅')">
+                <div class="unit-name">膜格栅</div>
+                <div class="unit-status">{st.session_state.unit_status['膜格栅']}</div>
+            </div>
+
+            <!-- 第二行：生物处理区（中行） -->
+            <div class="unit bio-treatment {'disabled' if not st.session_state.unit_data['厌氧池']['enabled'] else ''}" style="top: 430px; left: 810px; width: 50px; height: 60px;" onclick="selectUnit('厌氧池')">
+                <div class="unit-name">厌氧池</div>
+                <div class="unit-status">{st.session_state.unit_status['厌氧池']}</div>
+            </div>
+
+            <div class="unit bio-treatment {'disabled' if not st.session_state.unit_data['缺氧池']['enabled'] else ''}" style="top: 430px; left: 750px; width: 50px; height: 60px;" onclick="selectUnit('缺氧池')">
+                <div class="unit-name">缺氧池</div>
+                <div class="unit-status">{st.session_state.unit_status['缺氧池']}</div>
+            </div>
+
+            <div class="unit bio-treatment {'disabled' if not st.session_state.unit_data['好氧池']['enabled'] else ''}" style="top: 430px; left: 690px; width: 50px; height: 60px;" onclick="selectUnit('好氧池')">
+                <div class="unit-name">好氧池</div>
+                <div class="unit-status">{st.session_state.unit_status['好氧池']}</div>
+            </div>
+
+            <div class="unit bio-treatment {'disabled' if not st.session_state.unit_data['MBR膜池']['enabled'] else ''}" style="top: 430px; left: 520px; width: 90px; height: 60px;" onclick="selectUnit('MBR膜池')">
+                <div class="unit-name">MBR膜池</div>
+                <div class="unit-status">{st.session_state.unit_status['MBR膜池']}</div>
+            </div>
+
+            <div class="unit sludge-treatment {'disabled' if not st.session_state.unit_data['污泥处理车间']['enabled'] else ''}" style="top: 430px; left: 300px; width: 90px; height: 60px;" onclick="selectUnit('污泥处理车间')">
+                <div class="unit-name">污泥处理车间</div>
+                <div class="unit-status">{st.session_state.unit_status['污泥处理车间']}</div>
+            </div>
+
+            <!-- 中行最右侧：鼓风机房 -->
+            <div class="unit auxiliary {'disabled' if not st.session_state.unit_data['鼓风机房']['enabled'] else ''}" style="top: 430px; left: 930px; width: 90px; height: 60px;" onclick="selectUnit('鼓风机房')">
+                <div class="unit-name">鼓风机房</div>
+                <div class="unit-status">{st.session_state.unit_status['鼓风机房']}</div>
+            </div>
+
+            <!-- 除臭系统单元 -->
+            <div class="unit effluent-area {'disabled' if not st.session_state.unit_data['除臭系统']['enabled'] else ''}" style="top: 310px; left: 50px; width: 70px; height: 40px;" onclick="selectUnit('除臭系统')">
+                <div class="unit-name">除臭系统</div>
+                <div class="unit-status">{st.session_state.unit_status['除臭系统']}</div>
+            </div>
+
+            <!-- 第三行：深度处理区 -->
+            <div class="unit advanced-treatment {'disabled' if not st.session_state.unit_data['DF系统']['enabled'] else ''}" style="top: 650px; left: 520px; width: 90px; height: 60px;" onclick="selectUnit('DF系统')">
+                <div class="unit-name">DF系统</div>
+                <div class="unit-status">{st.session_state.unit_status['DF系统']}</div>
+            </div>
+
+            <div class="unit advanced-treatment {'disabled' if not st.session_state.unit_data['催化氧化']['enabled'] else ''}" style="top: 650px; left: 740px; width: 90px; height: 60px;" onclick="selectUnit('催化氧化')">
+                <div class="unit-name">催化氧化</div>
+                <div class="unit-status">{st.session_state.unit_status['催化氧化']}</div>
+            </div>
+
+            <!-- 出水区单元 -->
+            <div class="unit effluent-area {'disabled' if not st.session_state.unit_data['消毒接触池']['enabled'] else ''}" style="top: 660px; left: 325px; width: 76px; height: 40px;" onclick="selectUnit('消毒接触池')">
+                <div class="unit-name">消毒接触池</div>
+                <div class="unit-status">{st.session_state.unit_status['消毒接触池']}</div>
+            </div>
+
+            <!-- 水流线条与箭头 -->
+
+            <!-- 污泥流向 -->
+            <div class="flow-line" style="top: 410px; left: 460px; width: 5px; height: 120px; transform: rotate(90deg); background-color: #8B4513;"></div>
+            <div class="flow-line" style="top: 540px; left: 322px; width: 68px; height: 5px; transform: rotate(90deg); background-color: #8B4513;"></div>
+            <div class="flow-arrow" style="top: 573px; left: 349px; width: 0; height: 0; border-style: solid;border-width: 7px 7px 0 7px;border-color: #8B4513 transparent transparent transparent;"></div>
+            <div class="flow-arrow" style="top: 463px; left: 412px; width: 0; height: 0; border-style: solid;border-width: 7px 7px 7px 0;border-color: transparent #8B4513 transparent transparent;"></div>
+
+            <!-- 鼓风机到MBR膜池的气流 -->
+            <div class="flow-line" style="top: 470px; left: 770px; width: 180px; height: 5px; background-color: #999999; opacity: 0.6;"></div>
+
+            <!-- 水流动画 -->
+            <div class="water-flow" style="top: 197px; left: 80px; width: 66px; height: 7px;"></div>
+            <div class="water-flow" style="top: 197px; left: 270px; width: 30px; height: 7px;"></div>
+            <div class="water-flow" style="top: 197px; left: 411px; width: 40px; height: 7px;"></div>
+            <div class="water-flow" style="top: 197px; left: 560px; width: 42px; height: 7px;"></div>
+            <div class="water-flow" style="top: 197px; left: 709px; width: 42px; height: 7px;"></div>
+            <div class="water-flow" style="top: 197px; left: 100px; width: 30px; height: 7px; transform: rotate(180deg);"></div>
+            <div class="water-flow" style="top: 197px; left: 290px; width: 30px; height: 7px; transform: rotate(180deg);"></div>
+            <div class="water-flow" style="top: 197px; left: 431px; width: 30px; height: 7px; transform: rotate(180deg);"></div>
+            <div class="water-flow" style="top: 197px; left: 580px; width: 30px; height: 7px; transform: rotate(180deg);"></div>
+            <div class="water-flow" style="top: 197px; left: 729px; width: 30px; height: 7px; transform: rotate(180deg);"></div>
+            <div class="water-flow" style="top: 467px; left: 629px; width: 66px; height: 7px;"></div>
+            <div class="water-flow" style="top: 197px; left: 850px; width: 56px; height: 7px;"></div>
+            <div class="water-flow" style="top: 197px; left: 896px; width: 8px; height: 250px;"></div>
+            <div class="water-flow" style="top: 443px; left: 874px; width: 30px; height: 7px;"></div>
+            <div class="water-flow" style="top: 685px; left: 850px; width: 50px; height: 7px;"></div>
+
+            <div class="water-flow" style="top: 500px; left: 896px; width: 8px; height: 190px;"></div>
+            <div class="water-flow" style="top: 500px; left: 880px; width: 20px; height: 7px;"></div>
+
+            <div class="water-flow" style="top: 685px; left: 626px; width: 125px; height: 7px;"></div>
+            <div class="water-flow" style="top: 685px; left: 305px; width: 220px; height: 7px;"></div>
+            <div class="water-flow" style="top: 685px; left: 205px; width: 220px; height: 7px;"></div>
+
+            <div class="water-flow" style="top: 510px; left: 575px; width: 8px; height: 200px;"></div>
+
+            <!-- 污泥流动画 -->
+            <div class="sludge-flow" style="top: 120px; left: 207px; width: 5px; height: 40px;"></div>
+            <div class="sludge-flow" style="top: 120px; left: 508px; width: 5px; height: 40px;"></div>
+            <div class="sludge-flow" style="top: 120px; left: 658px; width: 5px; height: 40px;"></div>
+            <div class="sludge-flow" style="top: 120px; left: 807px; width: 5px; height: 40px;"></div>
+            <div class="flow-arrow" style="top: 123px; left: 204px; width: 0; height: 0; border-style: solid; border-width: 0 6px 6px 6px; border-color: transparent transparent #8B4513 transparent;"></div>
+            <div class="flow-arrow" style="top: 123px; left: 505px; width: 0; height: 0; border-style: solid; border-width: 0 6px 6px 6px; border-color: transparent transparent #8B4513 transparent;"></div>
+            <div class="flow-arrow" style="top: 123px; left: 655px; width: 0; height: 0; border-style: solid; border-width: 0 6px 6px 6px; border-color: transparent transparent #8B4513 transparent;"></div>
+            <div class="flow-arrow" style="top: 123px; left: 804px; width: 0; height: 0; border-style: solid; border-width: 0 6px 6px 6px; border-color: transparent transparent #8B4513 transparent;"></div>
+
+            <!-- 臭气流动画 -->
+            <div class="gas-flow" style="top: 243px; left: 202px; width: 6px; height: 100px;"></div>
+            <div class="gas-flow" style="top: 243px; left: 503px; width: 6px; height: 100px;"></div>
+            <div class="gas-flow" style="top: 243px; left: 652px; width: 6px; height: 100px;"></div>
+            <div class="gas-flow" style="top: 243px; left: 802px; width: 6px; height: 190px;"></div>
+            <div class="gas-flow" style="top: 340px; left: 350px; width: 6px; height: 100px;"></div>
+            <div class="gas-flow" style="top: 340px; left: 570px; width: 6px; height: 100px;"></div>
+            <div class="gas-flow" style="top: 340px; left: 35px; width: 800px; height: 4px;"></div>
+            <div class="gas-flow" style="top: 340px; left: 660px; width: 150px; height: 3px;"></div>
+            <div class="gas-flow" style="top: 352px; left: 90px; width: 6px; height: 61px;"></div>
+
+            <!-- 鼓风机到MBR膜池的气流动画 -->
+            <div class="air-flow" style="top: 900px; left: 770px; width: 230px; height: 5px;"></div>
+
+            <!-- 水流箭头 -->
+            <div class="flow-arrow" style="top: 193px; left: 136px; border-width: 8px 0 8px 8px; border-color: transparent transparent transparent #1e90ff;"></div>
+            <div class="flow-arrow" style="top: 193px; left: 293px; border-width: 8px 0 8px 8px; border-color: transparent transparent transparent #1e90ff;"></div>
+            <div class="flow-arrow" style="top: 193px; left: 442px; border-width: 8px 0 8px 8px; border-color: transparent transparent transparent #1e90ff;"></div>
+            <div class="flow-arrow" style="top: 193px; left: 593px; border-width: 8px 0 8px 8px; border-color: transparent transparent transparent #1e90ff;"></div>
+            <div class="flow-arrow" style="top: 193px; left: 741px; border-width: 8px 0 8px 8px; border-color: transparent transparent transparent #1e90ff;"></div>
+            <div class="flow-arrow" style="top: 642px; left: 572px; border-width: 8px 8px 0 8px; border-color: #1e90ff transparent transparent transparent;"></div>
+
+            <div class="flow-arrow" style="top: 464px; left: 633px; border-width: 8px 8px 8px 0; border-color: transparent #1e90ff transparent transparent;"></div>
+            <div class="flow-arrow" style="top: 439px; left: 882px; border-width: 8px 8px 8px 0; border-color: transparent #1e90ff transparent transparent;"></div>
+            <div class="flow-arrow" style="top: 496px; left: 882px; border-width: 8px 8px 8px 0; border-color: transparent #1e90ff transparent transparent;"></div>
+            <div class="flow-arrow" style="top: 682px; left: 423px; border-width: 8px 8px 8px 0; border-color: transparent #1e90ff transparent transparent;"></div>
+            <div class="flow-arrow" style="top: 682px; left: 222px; border-width: 8px 8px 8px 0; border-color: transparent #1e90ff transparent transparent;"></div>
+
+            <div class="flow-arrow" style="top: 682px; left: 732px; border-width: 8px 8px 8px 0; border-color: transparent #1e90ff transparent transparent; transform: rotate(180deg);"></div>
+
+            <!-- 臭气箭头 -->
+            <div class="flow-arrow" style="top: 410px; left: 85px; border-width: 8px 8px 0 8px; border-color: #A9A9A9 transparent transparent transparent;"></div>
+            <div class="flow-arrow" style="top: 334px; left: 144px; border-width: 8px 8px 8px 0; border-color: transparent #A9A9A9 transparent transparent;"></div>
+            <div class="flow-arrow" style="top: 464px; left: 883px; border-width: 8px 8px 8px 0; border-color: transparent #A9A9A9 transparent transparent;"></div>
+
+            <!-- 鼓风机到MBR膜池的箭头（白灰色透明） -->
+            <div class="flow-arrow" style="top: 450px; left: 775px; border-width: 5px 0 5px 8px; border-color: transparent transparent transparent rgba(255, 255, 255, 0.8);"></div>
+
+            <!-- 流向标签 -->
+            <div class="flow-label" style="top: 190px; left: 40px;">污水</div>
+            <div class="flow-label" style="top: 540px; left: 308px;">污泥</div>
+            <div class="flow-label" style="top: 435px; left: 440px;">污泥S5</div>
+            <div class="flow-label" style="top: 290px; left: 180px;">臭气G1</div>
+            <div class="flow-label" style="top: 290px; left: 480px;">臭气G2</div>
+            <div class="flow-label" style="top: 290px; left: 635px;">臭气G3</div>
+            <div class="flow-label" style="top: 290px; left: 780px;">臭气G4</div>
+            <div class="flow-label" style="top: 370px; left: 780px;">臭气G5</div>
+            <div class="flow-label" style="top: 370px; left: 545px;">臭气G6</div>
+            <div class="flow-label" style="top: 370px; left: 325px;">臭气G7</div>
+            <div class="flow-label" style="top: 415px; left: 46px;background:none;">处理后的臭气排放</div>
+            <div class="flow-label" style="top: 645px; left: 672px;">浓水</div>
+            <div class="flow-label" style="top: 710px; left: 672px;">臭氧</div>
+
+            <!-- 排出物标签 -->
+            <div class="flow-label" style="top: 100px; left: 185px; background: #FF6347;">栅渣S1</div>
+            <div class="flow-label" style="top: 100px; left: 485px; background: #FF6347;">栅渣S2</div>
+            <div class="flow-label" style="top: 100px; left: 635px; background: #FF6347;">沉渣S3</div>
+            <div class="flow-label" style="top: 100px; left: 785px; background: #FF6347;">栅渣S4</div>
+            <div class="flow-label" style="top: 580px; left: 340px; background: none;">外运</div>
+            <div class="flow-label" style="top: 675px; left: 190px; background: none;">排河</div>
+            <div class="special-flow-label" style="top: 520px; left: 750px;">MBR生物池</div>
+
+            <!-- 动态粒子 -->
+            <div class="particle" id="particle1" style="top: 197px; left: 80px;"></div>
+            <div class="particle" id="particle2" style="top: 197px; left: 411px;"></div>
+            <div class="particle" id="particle3" style="top: 197px; left: 560px;"></div>
+            <div class="particle" id="particle4" style="top: 197px; left: 709px;"></div>
+            <div class="particle" id="particle5" style="top: 197px; left: 270px;"></div>
+            <div class="particle" id="particle6" style="top: 685px; left: 660px;"></div>
+            <div class="particle" id="particle7" style="top: 685px; left: 675px;"></div>
+
+            <!-- 信息面板 -->
+            <div class="info-panel">
+                <h3>当前水流状态</h3>
+                <p>流量: {flow_rate} m³/d</p>
+                <p>COD: {st.session_state.water_quality["COD"]["in"]} → {st.session_state.water_quality["COD"]["out"]} mg/L</p>
+                <p>TN: {st.session_state.water_quality["TN"]["in"]} → {st.session_state.water_quality["TN"]["out"]} mg/L</p>
+            </div>
+        </div>
+
+        <script>
+            // 设置选中单元
+            function selectUnit(unitName) {{
+                // 高亮显示选中的单元
+                document.querySelectorAll('.unit').forEach(unit => {{
+                    unit.classList.remove('active');
+                }});
+
+                // 找到并高亮选中的单元
+                const units = document.querySelectorAll('.unit');
+                units.forEach(unit => {{
+                    if (unit.querySelector('.unit-name').textContent === unitName) {{
+                        unit.classList.add('active');
+                    }}
+                }});
+
+                // 发送单元选择信息到Streamlit
+                if (window.Streamlit) {{
+                    window.Streamlit.setComponentValue(unitName);
+                }}
+            }}
+
+            // 初始化选中单元
+            document.addEventListener('DOMContentLoaded', function() {{
+                const units = document.querySelectorAll('.unit');
+                units.forEach(unit => {{
+                    if (unit.querySelector('.unit-name').textContent === "{selected_unit}") {{
+                        unit.classList.add('active');
+                    }}
+                }});
+
+                // 粒子动画
+                function animateParticles() {{
+                    for (let i = 1; i <= 12; i++) {{
+                        const particle = document.getElementById(`particle${{i}}`);
+                        if (particle) {{
+                            const top = Math.random() * 5;
+                            const left = Math.random() * 50;
+                            particle.style.animation = `moveParticle ${{1 + Math.random()}}s linear infinite`;
+                        }}
+                    }}
+                    requestAnimationFrame(animateParticles);
+                }}
+                animateParticles();
+            }});
+        </script>
+    </body>
+    </html>
+    """
+    return html_content
+
+
+# 侧边栏：数据输入与处理
+with st.sidebar:
+    st.header("数据输入与设置")
+    # 上传运行数据（表格）
+    data_file = st.file_uploader("上传运行数据（Excel）", type=["xlsx"])
+
+    if data_file:
+        try:
+            # 尝试读取Excel文件
+            df = pd.read_excel(data_file, header=[0, 1])
+
+            # 处理多级表头 - 修复unhashable type错误
+            new_columns = []
+            for col in df.columns:
+                if isinstance(col, tuple):
+                    # 合并多级列名
+                    main_col = str(col[0]).strip().replace('\n', ' ')
+                    sub_col = str(col[1]).strip().replace('\n', ' ') if not pd.isna(col[1]) else ""
+                    combined = f"{main_col}_{sub_col}" if sub_col else main_col
+                    new_columns.append(combined)
                 else:
-                    # 重新构建模型结构
-                    self.model = self.build_model((self.sequence_length, len(self.feature_columns)))
+                    new_columns.append(str(col).strip().replace('\n', ' '))
 
-                    # 尝试加载权重
-                    if os.path.exists(weights_path):
-                        self.model.load_weights(weights_path)
-                        logger.info("使用权重加载方式成功!")
-                    else:
-                        logger.warning("权重文件不存在，只能使用模型架构")
-                        # 编译模型
-                        self.model.compile(optimizer='adam', loss='mse', metrics=['mae'])
-            except Exception as inner_e:
-                logger.error(f"所有加载方式均失败: {str(inner_e)}")
-                # 作为最后的手段，创建一个新的未训练模型
-                logger.info("创建新的未训练模型")
-                self.model = self.build_model((self.sequence_length, len(self.feature_columns)))
-                self.model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+            df.columns = new_columns
 
-    def predict(self, df, target_column='total_CO2eq', steps=365):
-        """科学的多步预测方法 - 完全重写"""
-        if self.model is None:
-            raise ValueError("模型未加载，请先加载或训练模型")
+            # 列名标准化
+            column_mapping = {}
+            for col in df.columns:
+                if "日期" in col:
+                    column_mapping[col] = "日期"
+                elif "处理水量" in col and ("m3" in col or "m³" in col):
+                    column_mapping[col] = "处理水量(m³)"
+                elif "能耗" in col and "kWh" in col:
+                    column_mapping[col] = "电耗(kWh)"
+                elif "自来水" in col:
+                    column_mapping[col] = "自来水(m³/d)"
+                elif "COD" in col and "进水" in col:
+                    column_mapping[col] = "进水COD(mg/L)"
+                elif "COD" in col and "出水" in col:
+                    column_mapping[col] = "出水COD(mg/L)"
+                elif "SS" in col and "进水" in col:
+                    column_mapping[col] = "进水SS(mg/L)"
+                elif "SS" in col and "出水" in col:
+                    column_mapping[col] = "出水SS(mg/L)"
+                elif "NH3-N" in col and "进水" in col:
+                    column_mapping[col] = "进水NH3-N(mg/L)"
+                elif "NH3-N" in col and "出水" in col:
+                    column_mapping[col] = "出水NH3-N(mg/L)"
+                elif "TN" in col and "进水" in col:
+                    column_mapping[col] = "进水TN(mg/L)"
+                elif "TN" in col and "出水" in col:
+                    column_mapping[col] = "出水TN(mg/L)"
+                elif "PAC消耗" in col or "PAC投加" in col:
+                    column_mapping[col] = "PAC投加量(kg)"
+                elif "次氯酸钠消耗" in col or "次氯酸钠投加" in col:
+                    column_mapping[col] = "次氯酸钠投加量(kg)"
+                elif "PAM" in col or "污泥脱水药剂" in col:
+                    column_mapping[col] = "PAM投加量(kg)"
+                elif "脱水污泥" in col or "污泥外运" in col:
+                    column_mapping[col] = "脱水污泥外运量(80%)"
 
-        # 确保目标缩放器存在
-        if not hasattr(self, 'target_scaler'):
-            self.target_scaler = MinMaxScaler()
-            # 如果目标列存在，初始化缩放器
-            if target_column in df.columns:
-                target_values = df[target_column].dropna().values.reshape(-1, 1)
-                if len(target_values) > 0:
-                    self.target_scaler.fit(target_values)
+            df = df.rename(columns=column_mapping)
 
-        # 确保特征缩放器存在
-        if not hasattr(self, 'feature_scalers') or not self.feature_scalers:
-            self.feature_scalers = {}
-            for col in self.feature_columns:
+            # 确保必需的列存在
+            required_columns = ["日期", "处理水量(m³)", "电耗(kWh)"]
+            for col in required_columns:
+                if col not in df.columns:
+                    st.error(f"错误：缺少必需列 '{col}'，请检查Excel文件格式")
+                    st.stop()
+
+            # 日期处理 - 修改这部分代码
+            if df["日期"].dtype in ['int64', 'float64']:
+                # 处理Excel序列日期
+                try:
+                    df["日期"] = pd.to_datetime(df["日期"], unit='D', origin='1899-12-30')
+                except:
+                    st.error("Excel日期格式解析错误")
+                    st.stop()
+            elif df["日期"].dtype == 'object':
+                try:
+                    df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
+                except:
+                    st.error("日期格式解析错误，请确保日期列格式正确")
+                    st.stop()
+
+            # 处理数值列
+            numeric_cols = ["处理水量(m³)", "电耗(kWh)", "进水COD(mg/L)", "出水COD(mg/L)",
+                            "进水TN(mg/L)", "出水TN(mg/L)", "PAC投加量(kg)", "PAM投加量(kg)"]
+            for col in numeric_cols:
                 if col in df.columns:
-                    self.feature_scalers[col] = MinMaxScaler()
-                    col_data = df[col].dropna().values.reshape(-1, 1)
-                    if len(col_data) > 0:
-                        self.feature_scalers[col].fit(col_data)
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
 
+            # 删除包含NaN的行
+            df = df.dropna(subset=required_columns)
 
-        # 0. 数据准备与校验
-        df = df.sort_values('日期').reset_index(drop=True)
-        if len(df) < self.sequence_length:
-            raise ValueError(f"需要至少{self.sequence_length}天的历史数据，当前只有{len(df)}天")
-        if '日期' not in df.columns:
-            raise ValueError("数据必须包含'日期'列")
+            if len(df) == 0:
+                st.error("错误：没有有效数据，请检查Excel文件内容")
+                st.stop()
 
-        # 1. 准备历史数据 - 使用提供的完整历史数据
-        historical_data = df.copy()
-        # 确保目标列已计算
-        if target_column not in historical_data.columns:
-            calculator = CarbonCalculator()
-            historical_data = calculator.calculate_direct_emissions(historical_data)
-            historical_data = calculator.calculate_indirect_emissions(historical_data)
-            historical_data = calculator.calculate_unit_emissions(historical_data)
+            # 创建年月选择
+            df["年月"] = df["日期"].dt.strftime("%Y年%m月")
+            unique_months = df["年月"].unique().tolist()
 
-        # 2. 分析历史趋势和季节性模式
-        # 使用完整的多年历史数据分析趋势和季节性
-        historical_data['年份'] = historical_data['日期'].dt.year
-        historical_data['月份'] = historical_data['日期'].dt.month
-        historical_data['日期序号'] = (historical_data['日期'] - historical_data['日期'].min()).dt.days
+            st.success(f"数据加载成功！共{len(df)}条有效记录")
 
-        # 计算各特征的年均增长率和季节性模式
-        feature_trends = {}
-        seasonal_patterns = {}
+            # 月份选择器
+            selected_month = st.selectbox(
+                "选择月份",
+                unique_months,
+                index=len(unique_months) - 1 if unique_months else 0
+            )
 
-        for col in self.feature_columns:
-            if col in historical_data.columns:
-                # 计算年均增长率（线性回归斜率）
-                X = historical_data['日期序号'].values.reshape(-1, 1)
-                y = historical_data[col].values
+            df_selected = df[df["年月"] == selected_month].drop(columns=["年月"])
+            st.session_state.df = df
+            st.session_state.df_selected = df_selected
+            st.session_state.selected_month = selected_month
 
-                # 使用稳健的线性回归（Huber回归）
-                from sklearn.linear_model import HuberRegressor
-                model = HuberRegressor()
-                model.fit(X, y)
-                feature_trends[col] = model.coef_[0]  # 每日增长量
+        except Exception as e:
+            st.error(f"数据加载错误: {str(e)}")
+            st.stop()
 
-                # 计算季节性模式（月度平均值）
-                monthly_avg = historical_data.groupby('月份')[col].mean()
-                seasonal_patterns[col] = monthly_avg.to_dict()
+    # 工艺优化参数
+    st.header("工艺优化模拟")
+    aeration_adjust = st.slider("曝气时间调整（%）", -30, 30, 0)
+    pac_adjust = st.slider("PAC投加量调整（%）", -20, 20, 0)
+    sludge_ratio = st.slider("污泥回流比", 0.3, 0.8, 0.5, 0.05)
 
-        # 3. 初始化预测序列：使用最后`sequence_length`天的数据
-        current_sequence = historical_data.tail(self.sequence_length).copy()
-        all_predictions = []
-        all_dates = []
+    # 动态效果控制
+    st.header("动态效果设置")
+    st.session_state.animation_active = st.checkbox("启用动态水流效果", value=True)
+    st.session_state.flow_data["flow_rate"] = st.slider("水流速度", 1000, 20000, 10000)
 
-        # 4. 多步预测循环
-        for step in range(steps):
-            try:
-                # 4.1 准备当前时间步的输入
-                X_input = []
-                missing_features = []
+    # 高级功能设置
+    st.header("高级功能设置")
 
-                for col in self.feature_columns:
-                    if col in current_sequence.columns and col in self.feature_scalers:
-                        col_data = current_sequence[col].values[-self.sequence_length:]
+    # 因子库管理
+    if st.button("更新电力排放因子"):
+        try:
+            latest_factor, year = st.session_state.factor_db.fetch_latest_electricity_factor()
+            if latest_factor:
+                st.success(f"已更新{year}年电力排放因子: {latest_factor} kgCO2/kWh")
+            else:
+                st.error("获取最新因子失败，请检查网络连接或手动更新")
+        except Exception as e:
+            st.error(f"更新电力排放因子失败: {e}")
 
-                        # 检查是否有NaN值，如果有则使用均值填充
-                        if np.isnan(col_data).any():
-                            col_mean = np.nanmean(col_data)
-                            col_data = np.where(np.isnan(col_data), col_mean, col_data)
+    # 模型训练 - 移到预测选项卡中
 
-                        # 缩放特征数据
-                        try:
-                            scaled_data = self.feature_scalers[col].transform(col_data.reshape(-1, 1))
-                            X_input.append(scaled_data.flatten())
-                        except:
-                            # 如果缩放失败，使用0填充
-                            scaled_data = np.zeros((self.sequence_length, 1))
-                            X_input.append(scaled_data.flatten())
-                            missing_features.append(col)
-                    else:
-                        # 对于模型训练时未见过的特征，使用0填充
-                        scaled_data = np.zeros((self.sequence_length, 1))
-                        X_input.append(scaled_data.flatten())
-                        missing_features.append(col)
+    # 数据生成
+    if st.button("生成模拟数据"):
+        with st.spinner("正在生成模拟数据..."):
+            simulator = DataSimulator()
+            simulated_data = simulator.generate_simulated_data()
+            st.session_state.df = simulated_data
+            st.session_state.df_selected = simulated_data.tail(30)  # 使用最近30天数据
+            st.success("模拟数据生成完成！")
 
-                # 记录缺失的特征
-                if missing_features:
-                    print(f"警告：以下特征缺失或缩放失败，使用0填充: {missing_features}")
+    if st.button("重置碳因子数据库"):
+        try:
+            # 删除数据库文件
+            import os
 
-                # 确保有数据可堆叠
-                if not X_input:
-                    raise ValueError("没有可用的特征数据进行预测。")
+            if os.path.exists("data/carbon_factors.db"):
+                os.remove("data/carbon_factors.db")
+                st.success("数据库已重置，将在下次运行时重新初始化")
+            else:
+                st.info("数据库文件不存在，无需重置")
+        except Exception as e:
+            st.error(f"重置数据库失败: {e}")
 
-                # 堆叠特征并调整形状为 [1, sequence_length, num_features]
-                X_input = np.stack(X_input, axis=1)
-                X_input = X_input.reshape(1, self.sequence_length, len(self.feature_columns))
+# 主界面使用选项卡组织内容
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    "工艺流程仿真", "碳足迹追踪", "碳账户管理", "优化与决策",
+    "碳排放预测", "减排技术分析", "因子库管理"
+])
 
-                # 4.2 进行单步预测
-                scaled_prediction = self.model.predict(X_input, verbose=0)[0][0]
-                prediction = self.target_scaler.inverse_transform(
-                    [[scaled_prediction]]
-                )[0][0]
-                prediction = max(0, prediction)  # 碳排放不为负
-                all_predictions.append(prediction)
+with tab1:
+    st.header("2D水厂工艺流程仿真")
 
-                # 4.3 为下一步预测创建新行（科学地更新所有特征）
-                last_date = current_sequence['日期'].iloc[-1]
-                next_date = last_date + pd.Timedelta(days=1)
-                all_dates.append(next_date)
+    # 创建两列布局
+    col1, col2 = st.columns([3, 1])
 
-                # 创建一个新的DataFrame行，基于趋势和季节性预测所有特征
-                new_row = current_sequence.iloc[-1:].copy()
-                new_row['日期'] = next_date
+    with col1:
+        # 渲染工艺流程图
+        plant_html = create_plant_diagram(
+            selected_unit=st.session_state.get('selected_unit', "粗格栅"),
+            flow_rate=st.session_state.flow_data["flow_rate"],
+            animation_active=st.session_state.animation_active
+        )
+        html(plant_html, height=920)
 
-                # 计算下一个日期的特征值（考虑趋势和季节性）
-                next_month = next_date.month
-                days_since_start = (next_date - historical_data['日期'].min()).days
+        # 处理单元选择事件
+        selected_unit = st.session_state.get('last_clicked_unit', "粗格栅")
+        if st.session_state.get('component_value'):
+            selected_unit = st.session_state.component_value
+            st.session_state.last_clicked_unit = selected_unit
+            st.session_state.selected_unit = selected_unit
+            st.experimental_rerun()
 
-                for col in self.feature_columns:
-                    if col in historical_data.columns:
-                        # 基础值：使用最近7天的平均值
-                        base_value = np.mean(current_sequence[col].values[-7:])
+        # 显示当前选中单元
+        if selected_unit:
+            st.success(f"当前选中单元: {selected_unit}")
 
-                        # 添加趋势成分
-                        trend_component = 0
-                        if col in feature_trends:
-                            trend_component = feature_trends[col] * days_since_start
+    with col2:
+        # 根据点击事件或下拉框选择单元
+        if st.session_state.get('last_clicked_unit'):
+            selected_unit = st.session_state.last_clicked_unit
+        else:
+            # 下拉框选项中包含除臭系统
+            selected_unit = st.selectbox(
+                "选择工艺单元",
+                list(st.session_state.unit_data.keys()),
+                key="unit_selector"
+            )
+        st.subheader(f"{selected_unit} - 参数设置")
+        unit_params = st.session_state.unit_data[selected_unit]
+        # 单元开关
+        unit_enabled = st.checkbox("启用单元", value=unit_params["enabled"], key=f"{selected_unit}_enabled")
+        st.session_state.unit_data[selected_unit]["enabled"] = unit_enabled
 
-                        # 添加季节性成分
-                        seasonal_component = 0
-                        if col in seasonal_patterns and next_month in seasonal_patterns[col]:
-                            # 使用该月份的历史平均值与全年平均值的差异作为季节性
-                            yearly_avg = np.mean(list(seasonal_patterns[col].values()))
-                            seasonal_component = seasonal_patterns[col][next_month] - yearly_avg
+        # 更新单元状态文字
+        status_text = "运行中" if unit_enabled else "已停用"
+        st.session_state.unit_status[selected_unit] = status_text
 
-                        # 添加合理的随机噪声（最大5%）
-                        noise_component = np.random.normal(0, base_value * 0.05)
+        # 通用参数
+        if "water_flow" in unit_params:
+            unit_params["water_flow"] = st.number_input(
+                "处理水量(m³)",
+                value=unit_params["water_flow"],
+                min_value=0.0
+            )
+        if "energy" in unit_params:
+            unit_params["energy"] = st.number_input(
+                "能耗(kWh)",
+                value=unit_params["energy"],
+                min_value=0.0
+            )
+        # 特殊参数
+        if selected_unit in ["厌氧池", "缺氧池", "好氧池"]:
+            unit_params["TN_in"] = st.number_input(
+                "进水TN(mg/L)",
+                value=unit_params["TN_in"],
+                min_value=0.0
+            )
+            unit_params["TN_out"] = st.number_input(
+                "出水TN(mg/L)",
+                value=unit_params["TN_out"],
+                min_value=0.0
+            )
+            unit_params["COD_in"] = st.number_input(
+                "进水COD(mg/L)",
+                value=unit_params["COD_in"],
+                min_value=0.0
+            )
+            unit_params["COD_out"] = st.number_input(
+                "出水COD(mg/L)",
+                value=unit_params["COD_out"],
+                min_value=0.0
+            )
+        if selected_unit == "DF系统":
+            unit_params["PAC"] = st.number_input(
+                "PAC投加量(kg)",
+                value=unit_params["PAC"],
+                min_value=0.0
+            )
+            st.info("次氯酸钠投加量: 100 kg/d")
+        if selected_unit == "催化氧化":
+            st.info("臭氧投加量: 80 kg/d")
+        if selected_unit == "污泥处理车间":
+            unit_params["PAM"] = st.number_input(
+                "PAM投加量(kg)",
+                value=unit_params["PAM"],
+                min_value=0.0
+            )
+        st.subheader(f"{selected_unit} - 当前状态")
+        st.metric("碳排放量", f"{unit_params['emission']:.2f} kgCO2eq")
+        st.metric("运行状态", status_text)
+        if "water_flow" in unit_params:
+            st.metric("处理水量", f"{unit_params['water_flow']:.0f} m³")
+        if "energy" in unit_params:
+            st.metric("能耗", f"{unit_params['energy']:.0f} kWh")
+        # 显示单元详情 - 使用可扩展区域
+        if selected_unit not in st.session_state.unit_details:
+            st.session_state.unit_details[selected_unit] = {
+                "description": "",
+                "notes": ""
+            }
+        with st.expander("单元详情", expanded=True):
+            st.session_state.unit_details[selected_unit]["description"] = st.text_area(
+                "单元描述",
+                value=st.session_state.unit_details[selected_unit]["description"],
+                height=100
+            )
+            st.session_state.unit_details[selected_unit]["notes"] = st.text_area(
+                "运行笔记",
+                value=st.session_state.unit_details[selected_unit]["notes"],
+                height=150
+            )
+        # 显示单元说明
+        if selected_unit == "粗格栅":
+            st.info("粗格栅主要用于去除污水中的大型固体杂质，防止后续设备堵塞")
+        elif selected_unit == "提升泵房":
+            st.info("提升泵房将污水提升到足够高度，以便重力流通过后续处理单元")
+        elif selected_unit == "厌氧池":
+            st.info("厌氧池进行有机物分解和磷的释放，产生少量甲烷")
+        elif selected_unit == "好氧池":
+            st.info("好氧池进行有机物氧化和硝化反应，是N2O主要产生源")
+        elif selected_unit == "DF系统":
+            st.info("DF系统进行深度过滤，需要投加PAC等化学药剂")
+        elif selected_unit == "污泥处理车间":
+            st.info("污泥处理车间进行污泥浓缩和脱水，需要投加PAM等絮凝剂")
+        elif selected_unit == "除臭系统":
+            st.info("除臭系统处理全厂产生的臭气，减少恶臭排放")
+        elif selected_unit == "消毒接触池":
+            st.info("消毒接触池对处理后的水进行消毒，确保水质安全")
 
-                        # 计算预测值
-                        predicted_value = base_value + trend_component + seasonal_component + noise_component
-                        predicted_value = max(0, predicted_value)  # 确保值合理
+with tab2:
+    st.header("碳足迹追踪与评估")
+    # 如果有选中的数据，进行碳核算计算
+    if 'df_selected' in st.session_state and st.session_state.df_selected is not None:
+        df_selected = st.session_state.df_selected
+        calculator = CarbonCalculator()
+        try:
+            df_calc = calculator.calculate_direct_emissions(df_selected)
+            df_calc = calculator.calculate_indirect_emissions(df_calc)
+            df_calc = calculator.calculate_unit_emissions(df_calc)
+            st.session_state.df_calc = df_calc
+            # 计算单元排放数据（包含除臭系统）
+            st.session_state.emission_data = {
+                "预处理区": df_calc['pre_CO2eq'].sum(),
+                "生物处理区": df_calc['bio_CO2eq'].sum(),
+                "深度处理区": df_calc['depth_CO2eq'].sum(),
+                "泥处理区": df_calc['sludge_CO2eq'].sum(),
+                "出水区": df_calc['effluent_CO2eq'].sum(),
+                "除臭系统": df_calc['deodorization_CO2eq'].sum()  # 新增除臭系统
+            }
+        except Exception as e:
+            st.error(f"碳核算计算错误: {str(e)}")
+            st.stop()
+    # 工艺全流程碳排热力图
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("工艺全流程碳排热力图")
+        if st.session_state.emission_data:
+            heatmap_fig = vis.create_heatmap_overlay(st.session_state.emission_data)
+            st.plotly_chart(heatmap_fig)
+        else:
+            st.warning("请先上传运行数据")
+    with col2:
+        st.subheader("碳流动态追踪图谱")
+        if 'df_calc' in st.session_state and st.session_state.df_calc is not None:
+            sankey_fig = vis.create_sankey_diagram(st.session_state.df_calc)
+            st.plotly_chart(sankey_fig)
+        else:
+            st.warning("请先上传运行数据")
+    # 碳排放效率排行榜
+    if 'df_calc' in st.session_state and st.session_state.df_calc is not None:
+        st.subheader("碳排放效率排行榜")
+        eff_fig = vis.create_efficiency_ranking(st.session_state.df_calc)
+        st.plotly_chart(eff_fig)
 
-                        new_row[col] = predicted_value
-
-                # 目标列使用模型预测值
-                new_row[target_column] = prediction
-
-                # 4.4 将新行追加到序列中，并移除最旧的一行，保持序列长度不变
-                current_sequence = pd.concat([current_sequence, new_row], ignore_index=True)
-                current_sequence = current_sequence.tail(self.sequence_length).reset_index(drop=True)
-
-            except Exception as e:
-                print(f"第{step + 1}步预测失败: {str(e)}")
-                # 如果失败，使用更稳健的回退策略
-                if all_predictions:
-                    # 使用指数平滑回退
-                    alpha = 0.3
-                    fallback_value = alpha * all_predictions[-1] + (1 - alpha) * historical_data[target_column].mean()
-                else:
-                    fallback_value = historical_data[target_column].mean()
-
-                all_predictions.append(fallback_value)
-                next_date = last_date + pd.Timedelta(days=1) if 'last_date' in locals() else \
-                    historical_data['日期'].iloc[-1] + pd.Timedelta(days=step + 1)
-                all_dates.append(next_date)
-
-        # 5. 生成预测结果DataFrame
-        result_df = pd.DataFrame({
-            '日期': all_dates,
-            'predicted_CO2eq': all_predictions
+with tab3:
+    st.header("碳账户管理")
+    if 'df_calc' in st.session_state and st.session_state.df_calc is not None:
+        df_calc = st.session_state.df_calc
+        # 碳账户明细（包含除臭系统）
+        st.subheader("碳账户收支明细（当月）")
+        account_df = pd.DataFrame({
+            "工艺单元": ["预处理区", "生物处理区", "深度处理区", "泥处理区", "出水区", "除臭系统"],
+            "碳流入(kgCO2eq)": [
+                df_calc['energy_CO2eq'].sum() * 0.3193,
+                df_calc['energy_CO2eq'].sum() * 0.4453,
+                df_calc['energy_CO2eq'].sum() * 0.1155 + df_calc['chemicals_CO2eq'].sum(),
+                df_calc['energy_CO2eq'].sum() * 0.0507,
+                df_calc['energy_CO2eq'].sum() * 0.0672,
+                df_calc['energy_CO2eq'].sum() * 0.0267  # 除臭系统能耗占比
+            ],
+            "碳流出(kgCO2eq)": [
+                df_calc['pre_CO2eq'].sum(),
+                df_calc['bio_CO2eq'].sum(),
+                df_calc['depth_CO2eq'].sum(),
+                df_calc['sludge_CO2eq'].sum(),
+                df_calc['effluent_CO2eq'].sum(),
+                df_calc['deodorization_CO2eq'].sum()  # 除臭系统排放
+            ],
+            "净排放(kgCO2eq)": [
+                df_calc['pre_CO2eq'].sum() - df_calc['energy_CO2eq'].sum() * 0.3193,
+                df_calc['bio_CO2eq'].sum() - df_calc['energy_CO2eq'].sum() * 0.4453,
+                df_calc['depth_CO2eq'].sum() - (
+                        df_calc['energy_CO2eq'].sum() * 0.1155 + df_calc['chemicals_CO2eq'].sum()),
+                df_calc['sludge_CO2eq'].sum() - df_calc['energy_CO2eq'].sum() * 0.0507,
+                df_calc['effluent_CO2eq'].sum() - df_calc['energy_CO2eq'].sum() * 0.0672,
+                df_calc['deodorization_CO2eq'].sum() - df_calc['energy_CO2eq'].sum() * 0.0267  # 除臭系统净排放
+            ]
         })
 
-        # 6. 计算科学合理的置信区间 - 修复版
-        # 使用更稳健的方法计算置信区间
-        if len(historical_data) > self.sequence_length:
-            # 使用历史数据进行回测，计算预测误差
-            historical_errors = []
-            valid_backtests = 0
+        # 添加样式
 
-            # 限制回测次数以提高性能
-            max_backtests = min(50, len(historical_data) - self.sequence_length)
-            step_size = max(1, (len(historical_data) - self.sequence_length) // max_backtests)
 
-            for i in range(self.sequence_length, len(historical_data), step_size):
-                if i >= len(historical_data):
-                    break
+        def color_negative_red(val):
+            color = 'red' if val < 0 else 'green'
+            return f'color: {color}'
 
-                train_data = historical_data.iloc[:i]
-                actual_value = historical_data.iloc[i][target_column]
 
-                # 确保有足够的数据
-                if len(train_data) < self.sequence_length:
-                    continue
-
-                # 使用最近sequence_length天数据预测
-                X_test = []
-                test_sequence = train_data.tail(self.sequence_length)
-
-                for col in self.feature_columns:
-                    if col in test_sequence.columns and col in self.feature_scalers:
-                        col_data = test_sequence[col].values[-self.sequence_length:]
-
-                        # 处理NaN值
-                        if np.isnan(col_data).any():
-                            col_mean = np.nanmean(col_data)
-                            col_data = np.where(np.isnan(col_data), col_mean, col_data)
-
-                        try:
-                            scaled_data = self.feature_scalers[col].transform(col_data.reshape(-1, 1))
-                            X_test.append(scaled_data.flatten())
-                        except:
-                            # 如果缩放失败，使用0填充
-                            scaled_data = np.zeros((self.sequence_length, 1))
-                            X_test.append(scaled_data.flatten())
-
-                if not X_test or len(X_test) != len(self.feature_columns):
-                    continue
-
+        styled_account = account_df.style.applymap(color_negative_red, subset=['净排放(kgCO2eq)'])
+        st.dataframe(styled_account, height=300)
+        # 自定义公式计算器
+        st.subheader("自定义公式计算器")
+        st.markdown("""
+        **使用说明**:
+        1. 在下方输入公式名称和表达式
+        2. 公式中可以使用以下变量（单位）:
+           - 处理水量(m³): `water_flow`
+           - 能耗(kWh): `energy`
+           - 药耗(kg): `chemicals`
+           - PAC投加量(kg): `pac`
+           - PAM投加量(kg): `pam`
+           - 次氯酸钠投加量(kg): `naclo`
+           - 进水TN(mg/L): `tn_in`
+           - 出水TN(mg/L): `tn_out`
+           - 进水COD(mg/L): `cod_in`
+           - 出水COD(mg/L): `cod_out`
+        3. 支持数学运算和函数: `+`, `-`, `*`, `/`, `**`, `sqrt()`, `log()`, `exp()`, `sin()`, `cos()`等
+        """)
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            formula_name = st.text_input("公式名称", "单位水处理碳排放")
+            formula_expression = st.text_area("公式表达式", "energy * 0.9419 / water_flow")
+            if st.button("保存公式"):
+                if formula_name and formula_expression:
+                    st.session_state.custom_calculations[formula_name] = formula_expression
+                    st.success(f"公式 '{formula_name}' 已保存！")
+                else:
+                    st.warning("请填写公式名称和表达式")
+        with col2:
+            if st.session_state.custom_calculations:
+                selected_formula = st.selectbox("选择公式", list(st.session_state.custom_calculations.keys()))
+                st.code(f"{selected_formula}: {st.session_state.custom_calculations[selected_formula]}")
+        # 公式计算区域
+        if st.session_state.custom_calculations:
+            st.subheader("公式计算")
+            # 创建变量输入表
+            variables = {
+                "water_flow": "处理水量(m³)",
+                "energy": "能耗(kWh)",
+                "chemicals": "药耗总量(kg)",
+                "pac": "PAC投加量(kg)",
+                "pam": "PAM投加量(kg)",
+                "naclo": "次氯酸钠投加量(kg)",
+                "tn_in": "进水TN(mg/L)",
+                "tn_out": "出水TN(mg/L)",
+                "cod_in": "进水COD(mg/L)",
+                "cod_out": "出水COD(mg/L)"
+            }
+            col1, col2, col3 = st.columns(3)
+            var_values = {}
+            # 动态生成变量输入
+            for i, (var, label) in enumerate(variables.items()):
+                if i % 3 == 0:
+                    with col1:
+                        var_values[var] = st.number_input(label, value=0.0, key=f"var_{var}")
+                elif i % 3 == 1:
+                    with col2:
+                        var_values[var] = st.number_input(label, value=0.0, key=f"var_{var}")
+                else:
+                    with col3:
+                        var_values[var] = st.number_input(label, value=0.0, key=f"var_{var}")
+            # 计算按钮
+            if st.button("计算公式"):
                 try:
-                    X_test = np.stack(X_test, axis=1)
-                    X_test = X_test.reshape(1, self.sequence_length, len(self.feature_columns))
+                    # 安全计算环境
+                    safe_env = {
+                        "__builtins__": None,
+                        "math": math,
+                        "sqrt": math.sqrt,
+                        "log": math.log,
+                        "exp": math.exp,
+                        "sin": math.sin,
+                        "cos": math.cos,
+                        "tan": math.tan,
+                        "pi": math.pi,
+                        "e": math.e
+                    }
+                    # 添加变量值
+                    safe_env.update(var_values)
+                    # 获取当前公式
+                    formula = st.session_state.custom_calculations[selected_formula]
+                    # 计算结果
+                    result = eval(formula, {"__builtins__": None}, safe_env)
+                    # 保存结果
+                    st.session_state.formula_results[selected_formula] = {
+                        "result": result,
+                        "variables": var_values.copy()
+                    }
+                    st.success(f"计算结果: {result:.4f}")
+                except Exception as e:
+                    st.error(f"计算错误: {str(e)}")
+            # 显示历史计算结果
+            if st.session_state.formula_results:
+                st.subheader("历史计算结果")
+                for formula_name, result_data in st.session_state.formula_results.items():
+                    st.markdown(f"**{formula_name}**: {result_data['result']:.4f}")
+                    st.json(result_data["variables"])
 
-                    scaled_pred = self.model.predict(X_test, verbose=0)[0][0]
-                    prediction = self.target_scaler.inverse_transform([[scaled_pred]])[0][0]
+with tab4:
+    st.header("优化与决策支持")
 
-                    # 只计算相对误差如果实际值大于0
-                    if actual_value > 0:
-                        error = abs(prediction - actual_value) / actual_value
-                        historical_errors.append(error)
-                        valid_backtests += 1
-                except:
-                    continue
+    # 在tab4（优化与决策）中添加工艺调整建议：
+    if st.session_state.df is not None:
+        # 添加工艺调整建议
+        st.subheader("工艺调整建议")
+        adjustments = calculator.generate_process_adjustments(st.session_state.df)
 
-            # 确保有足够的有效回测
-            if valid_backtests >= 10:
-                mean_error = np.mean(historical_errors)
-                std_error = np.std(historical_errors)
-            else:
-                # 使用基于数据变异性的默认误差估计
-                target_values = historical_data[target_column].values
-                target_var = np.std(target_values) / np.mean(target_values) if np.mean(target_values) > 0 else 0.2
-                mean_error = max(0.1, min(0.3, target_var * 0.8))  # 10%-30%的误差范围
-                std_error = mean_error * 0.5
+        if adjustments:
+            for adj in adjustments:
+                with st.expander(f"{adj['单元']}: {adj['问题']}"):
+                    st.write(f"**建议**: {adj['建议']}")
+                    st.write(f"**预期减排**: {adj['预期减排']}")
         else:
-            # 默认误差估计
-            mean_error = 0.15  # 15%的平均误差
-            std_error = 0.08  # 8%的标准差
-
-        # 置信区间考虑预测步长的增加而扩大（不确定性随时间增加）
-        confidence_factors = []
-        for i in range(steps):
-            # 不确定性随预测步长增加 - 使用S形曲线而不是线性增加
-            # 前30天增加较快，之后趋于平稳
-            if i < 30:
-                uncertainty_factor = 1 + (i / 30) * 1.5  # 前30天增加到2.5倍
+            st.info("当前运行状况良好，无需重大调整")
+    if 'df_calc' in st.session_state and st.session_state.df_calc is not None:
+        df_calc = st.session_state.df_calc
+        df = st.session_state.df
+        df_selected = st.session_state.df_selected
+        # 异常识别与优化建议
+        st.subheader("异常识别与优化建议")
+        if len(df) >= 3 and 'total_CO2eq' in df_calc.columns and '处理水量(m³)' in df.columns:
+            # 计算历史平均值（使用处理水量加权）
+            total_water = df['处理水量(m³)'].sum()
+            if total_water > 0:
+                historical_mean = df_calc['total_CO2eq'].sum() / total_water
             else:
-                uncertainty_factor = 2.5 + ((i - 30) / (steps - 30)) * 0.5  # 之后缓慢增加到3倍
+                historical_mean = 0
+            current_water = df_selected['处理水量(m³)'].sum()
+            if current_water > 0:
+                current_total = df_calc['total_CO2eq'].sum() / current_water
+            else:
+                current_total = 0
+            if historical_mean > 0 and current_total > 1.5 * historical_mean:
+                st.warning(f"⚠️ 异常预警：当月单位水量碳排放（{current_total:.4f} kgCO2eq/m³）超历史均值50%！")
+                # 识别主要问题区域（包含除臭系统）
+                unit_emissions = {
+                    "预处理区": df_calc['pre_CO2eq'].sum() / current_water,
+                    "生物处理区": df_calc['bio_CO2eq'].sum() / current_water,
+                    "深度处理区": df_calc['depth_CO2eq'].sum() / current_water,
+                    "泥处理区": df_calc['sludge_CO2eq'].sum() / current_water,
+                    "出水区": df_calc['effluent_CO2eq'].sum() / current_water,
+                    "除臭系统": df_calc['deodorization_CO2eq'].sum() / current_water
+                }
+                max_unit = max(unit_emissions, key=unit_emissions.get)
+                st.error(f"主要问题区域: {max_unit} (排放强度: {unit_emissions[max_unit]:.4f} kgCO2eq/m³)")
+                # 针对性建议
+                if max_unit == "生物处理区":
+                    st.info("优化建议：")
+                    st.write("- 检查曝气系统效率，优化曝气量")
+                    st.write("- 调整污泥回流比，优化生物处理效率")
+                    st.write("- 监控进水水质波动，避免冲击负荷")
+                elif max_unit == "深度处理区":
+                    st.info("优化建议：")
+                    st.write("- 优化化学药剂投加量，避免过量投加")
+                    st.write("- 检查混合反应效果，提高药剂利用率")
+                    st.write("- 考虑使用更环保的替代药剂")
+                elif max_unit == "预处理区":
+                    st.info("优化建议：")
+                    st.write("- 优化格栅运行频率，降低能耗")
+                    st.write("- 检查水泵效率，考虑变频控制")
+                    st.write("- 加强进水监控，避免大颗粒物进入")
+                elif max_unit == "出水区" or max_unit == "除臭系统":  # 除臭系统与出水区建议类似
+                    st.info("优化建议：")
+                    st.write("- 优化消毒剂投加量，减少化学药剂使用")
+                    st.write("- 检查消毒接触时间，提高消毒效率")
+                    st.write("- 考虑紫外线消毒等低碳替代方案")
+                else:
+                    st.info("优化建议：")
+                    st.write("- 优化污泥脱水工艺参数")
+                    st.write("- 检查脱水设备运行效率")
+                    st.write("- 考虑污泥资源化利用途径")
+            else:
+                st.success("✅ 当月碳排放水平正常")
+        else:
+            st.info("数据量不足，无法进行异常识别")
+        # 优化效果模拟
+        st.subheader("工艺优化效果模拟")
+        if not df_selected.empty:
+            optimized_bio = df_calc['bio_CO2eq'].sum() * (1 - aeration_adjust / 100)
+            optimized_depth = df_calc['depth_CO2eq'].sum() * (1 - pac_adjust / 100)
+            optimized_total = (df_calc['total_CO2eq'].sum()
+                                - (df_calc['bio_CO2eq'].sum() - optimized_bio)
+                                - (df_calc['depth_CO2eq'].sum() - optimized_depth))
+            # 创建优化效果图表 - 所有文字改为黑色
+            opt_fig = go.Figure()
+            opt_fig.add_trace(go.Bar(
+                x=["优化前", "优化后"],
+                y=[df_calc['total_CO2eq'].sum(), optimized_total],
+                marker_color=["#EF553B", "#00CC96"],
+                text=[f"{emission:.1f}" for emission in [df_calc['total_CO2eq'].sum(), optimized_total]],
+                textposition='auto',
+                textfont=dict(color='black')  # 确保文字为黑色
+            ))
+            opt_fig.update_layout(
+                title=f"优化效果：月度减排{(df_calc['total_CO2eq'].sum() - optimized_total):.1f} kgCO2eq",
+                title_font=dict(color="black"),  # 标题文字颜色改为黑色
+                yaxis_title="总碳排放（kgCO2eq/月）",
+                yaxis_title_font=dict(color="black"),  # Y轴标题文字颜色改为黑色
+                font=dict(size=14, color="black"),  # 整体文字颜色改为黑色
+                plot_bgcolor="rgba(245, 245, 245, 1)",
+                paper_bgcolor="rgba(245, 245, 245, 1)",
+                height=400,
+                # 确保坐标轴标签颜色为黑色
+                xaxis=dict(
+                    tickfont=dict(color="black"),
+                    title_font=dict(color="black")
+                ),
+                yaxis=dict(
+                    tickfont=dict(color="black"),
+                    title_font=dict(color="black")
+                )
+            )
+            # 添加减排量标注 - 文字颜色改为黑色
+            opt_fig.add_annotation(
+                x=1, y=optimized_total,
+                    text=f"减排: {df_calc['total_CO2eq'].sum() - optimized_total:.1f} kg",
+                    showarrow=True,
+                    arrowhead=1,
+                    ax=0,
+                    ay=-40,
+                    font=dict(color="black")  # 标注文字颜色改为黑色
+            )
+            st.plotly_chart(opt_fig)
+            # 显示优化细节
+            st.subheader("优化措施详情")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("曝气时间调整", f"{aeration_adjust}%",
+                            delta=f"生物处理区减排: {df_calc['bio_CO2eq'].sum() - optimized_bio:.1f} kgCO2eq",
+                            delta_color="inverse")
+            with col2:
+                st.metric("PAC投加量调整", f"{pac_adjust}%",
+                            delta=f"深度处理区减排: {df_calc['depth_CO2eq'].sum() - optimized_depth:.1f} kgCO2eq",
+                            delta_color="inverse")
+        else:
+            st.warning("没有选中数据，无法进行优化模拟")
+    else:  # 这里应该是与第1291行的if语句对齐
+        st.warning("请先上传运行数据")
 
-            confidence_factors.append(uncertainty_factor)
+with tab5:
+    st.header("碳排放趋势预测")
 
-        # 计算上下界 - 确保不为零且合理
-        result_df['lower_bound'] = [
-            max(1, pred * (1 - mean_error * factor - std_error))  # 确保不小于1
-            for pred, factor in zip(result_df['predicted_CO2eq'], confidence_factors)
-        ]
-        result_df['upper_bound'] = [
-            pred * (1 + mean_error * factor + std_error)
-            for pred, factor in zip(result_df['predicted_CO2eq'], confidence_factors)
-        ]
+    # 第一部分：加载预训练模型
+    st.subheader("1. 模型管理")
+    load_col1, load_col2 = st.columns([1, 3])
+    with load_col1:
+        if st.button("加载预训练模型", key="load_model_btn"):
+            try:
+                # 初始化LSTM预测器
+                if st.session_state.lstm_predictor is None:
+                    st.session_state.lstm_predictor = CarbonLSTMPredictor()
+                    # 尝试加载预训练模型
+                    model_path = "models/carbon_lstm_model.h5"
+                    if os.path.exists(model_path):
+                        st.session_state.lstm_predictor.load_model(model_path)
+                        st.success("✅ 预训练模型加载成功！")
+                    else:
+                        st.warning("⚠️ 未找到预训练模型，已创建新模型")
+            except Exception as e:
+                st.error(f"加载模型失败: {str(e)}")
+    with load_col2:
+        st.info("加载已训练好的LSTM模型进行预测。如果模型不存在，将创建一个新的未训练模型。")
 
-        # 添加季节性调整 - 基于历史数据的月度模式
-        if len(historical_data) > 365:  # 至少有1年数据
-            # 分析历史月度模式
-            historical_data['月份'] = historical_data['日期'].dt.month
-            monthly_pattern = historical_data.groupby('月份')[target_column].mean()
-            yearly_avg = monthly_pattern.mean()
+    # 第二部分：训练新模型
+    st.subheader("2. 模型训练")
+    train_col1, train_col2 = st.columns([1, 3])
+    with train_col1:
+        if st.button("训练新模型", key="train_model_btn"):
+            if st.session_state.df is not None and len(st.session_state.df) >= 30:
+                with st.spinner("正在训练新模型，这可能需要几分钟..."):
+                    try:
+                        # 确保数据已计算碳排放
+                        calculator = CarbonCalculator()
+                        df_with_emissions = calculator.calculate_direct_emissions(st.session_state.df)
+                        df_with_emissions = calculator.calculate_indirect_emissions(df_with_emissions)
+                        df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
 
-            if yearly_avg > 0:
-                # 计算每月相对于年平均的比率
-                monthly_ratios = monthly_pattern / yearly_avg
+                        # 初始化预测器并训练
+                        if st.session_state.lstm_predictor is None:
+                            st.session_state.lstm_predictor = CarbonLSTMPredictor()
 
-                # 应用月度模式到预测
-                for i, row in result_df.iterrows():
-                    month = row['日期'].month
-                    if month in monthly_ratios:
-                        ratio = monthly_ratios[month]
-                        # 适度调整预测值（不完全遵循历史模式）
-                        adjustment = 0.3  # 只应用30%的季节性调整
-                        result_df.at[i, 'predicted_CO2eq'] = row['predicted_CO2eq'] * (1 + adjustment * (ratio - 1))
-                        result_df.at[i, 'lower_bound'] = row['lower_bound'] * (1 + adjustment * (ratio - 1))
-                        result_df.at[i, 'upper_bound'] = row['upper_bound'] * (1 + adjustment * (ratio - 1))
-        return result_df
+                        # 训练模型
+                        training_history = st.session_state.lstm_predictor.train(
+                            df_with_emissions,
+                            'total_CO2eq',
+                            epochs=50,
+                            validation_split=0.2
+                        )
 
-    def generate_future_dates(self, last_date, days=7):
-        """生成未来日期序列"""
-        return [last_date + timedelta(days=i) for i in range(1, days + 1)]
+                        # 保存模型
+                        os.makedirs("models", exist_ok=True)
+                        st.session_state.lstm_predictor.save_model("models/carbon_lstm_model.h5")
+
+                        st.success("✅ 模型训练完成并已保存！")
+
+                        # 显示训练历史图表
+                        if training_history is not None:
+                            history_fig = vis.create_training_history_chart(training_history)
+                            st.plotly_chart(history_fig, use_container_width=True)
+
+                    except Exception as e:
+                        st.error(f"模型训练失败: {str(e)}")
+            else:
+                st.warning("请先上传足够的数据（至少30天记录）")
+    with train_col2:
+        st.info("使用当前数据训练新的LSTM模型。需要先上传数据并确保数据包含足够的日期记录。")
+
+    # 第三部分：进行预测
+    st.subheader("3. 预测设置")
+    predict_col1, predict_col2 = st.columns([1, 3])
+
+    with predict_col1:
+        # 固定预测12个月（2025年全年）
+        prediction_months = 12
+        st.info(f"预测范围: 2025年全年（12个月）")
+
+        # 定义预测天数 - 固定为365天（一年）
+        prediction_days = 365
+
+        # 将预测按钮移到这里
+        if st.button("进行预测", key="predict_btn"):
+            if st.session_state.lstm_predictor is not None:
+                with st.spinner(f"正在进行2025年全年预测..."):
+                    try:
+                        if st.session_state.df is not None:
+                            # 确保数据已计算碳排放
+                            calculator = CarbonCalculator()
+                            df_with_emissions = calculator.calculate_direct_emissions(st.session_state.df)
+                            df_with_emissions = calculator.calculate_indirect_emissions(df_with_emissions)
+                            df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
+
+                            # 进行预测 - 预测365天然后聚合为月度数据
+                            prediction_df = st.session_state.lstm_predictor.predict(
+                                df_with_emissions,
+                                'total_CO2eq',
+                                steps=365  # 预测一年每天的数据
+                            )
+
+                            # 将日预测数据转换为月预测数据
+                            prediction_df['日期'] = pd.to_datetime(prediction_df['日期'])
+                            prediction_df.set_index('日期', inplace=True)
+
+                            # 按月聚合 - 使用平均值
+                            monthly_prediction = prediction_df.resample('M').agg({
+                                'predicted_CO2eq': 'mean',
+                                'lower_bound': 'mean',
+                                'upper_bound': 'mean'
+                            })
+
+                            # 添加年月列用于显示
+                            monthly_prediction.reset_index(inplace=True)
+                            monthly_prediction['年月'] = monthly_prediction['日期'].dt.strftime('%Y年%m月')
+
+                            # 只保留2025年的数据
+                            monthly_prediction = monthly_prediction[monthly_prediction['日期'].dt.year == 2025]
+
+                            # 存储结果
+                            st.session_state.prediction_data = monthly_prediction
+                            st.session_state.historical_data = df_with_emissions
+                            st.session_state.prediction_made = True
+
+                            st.success("✅ 预测完成！")
+                    except Exception as e:
+                        st.error(f"预测失败: {str(e)}")
+                        # 使用简单预测作为备选
+                        try:
+                            # 修改简单预测也返回月度数据
+                            simple_prediction = calculator._simple_emission_prediction(
+                                st.session_state.df, 365  # 预测一年
+                            )
+
+                            # 转换为月度数据
+                            simple_prediction['日期'] = pd.to_datetime(simple_prediction['日期'])
+                            simple_prediction.set_index('日期', inplace=True)
+                            monthly_simple = simple_prediction.resample('M').agg({
+                                'predicted_CO2eq': 'mean',
+                                'lower_bound': 'mean',
+                                'upper_bound': 'mean'
+                            })
+                            monthly_simple.reset_index(inplace=True)
+                            monthly_simple['年月'] = monthly_simple['日期'].dt.strftime('%Y年%m月')
+                            monthly_simple = monthly_simple[monthly_simple['日期'].dt.year == 2025]
+
+                            st.session_state.prediction_data = monthly_simple
+                            st.session_state.historical_data = df_with_emissions
+                            st.session_state.prediction_made = True
+                            st.warning("使用简单预测方法生成数据")
+                        except Exception as fallback_error:
+                            st.error(f"简单预测也失败: {str(fallback_error)}")
+            else:
+                st.warning("请先加载或训练模型")
+
+    with predict_col2:
+        st.info("预测2025年全年每月碳排放数据。使用LSTM模型基于2018-2024年历史数据进行预测。")
+
+    # 第四部分：预测结果显示
+    if st.session_state.get('prediction_made', False):
+        st.subheader("预测结果")
+
+        # 显示预测图表
+        forecast_fig = vis.create_forecast_chart(
+            st.session_state.historical_data,
+            st.session_state.prediction_data
+        )
+        st.plotly_chart(forecast_fig, use_container_width=True)
+
+        # 显示预测数值
+        st.subheader("预测数值详情")
+        if not st.session_state.prediction_data.empty:
+            display_df = st.session_state.prediction_data.copy()
+            if '日期' in display_df.columns:
+                display_df = display_df[['日期', 'predicted_CO2eq', 'lower_bound', 'upper_bound']]
+                display_df = display_df.rename(columns={
+                    'predicted_CO2eq': '预测碳排放(kgCO2eq)',
+                    'lower_bound': '预测下限(kgCO2eq)',
+                    'upper_bound': '预测上限(kgCO2eq)'
+                })
+
+                # 格式化数值
+                for col in ['预测碳排放(kgCO2eq)', '预测下限(kgCO2eq)', '预测上限(kgCO2eq)']:
+                    display_df[col] = display_df[col].round(1)
+
+                st.dataframe(display_df, height=300)
+
+                # 计算平均预测值
+                avg_prediction = display_df['预测碳排放(kgCO2eq)'].mean()
+
+                # 计算并显示变化趋势
+                if not st.session_state.historical_data.empty and 'total_CO2eq' in st.session_state.historical_data.columns:
+                    current_avg = st.session_state.historical_data['total_CO2eq'].mean()
+                    change = ((avg_prediction - current_avg) / current_avg * 100) if current_avg > 0 else 0
+
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("平均预测值", f"{avg_prediction:.1f} kgCO2eq/天")
+                    with col2:
+                        # 使用预测数据的上下界来计算区间
+                        avg_lower = display_df['预测下限(kgCO2eq)'].mean()
+                        avg_upper = display_df['预测上限(kgCO2eq)'].mean()
+                        st.metric("预测区间", f"{avg_lower:.1f} - {avg_upper:.1f} kgCO2eq/天")
+                    with col3:
+                        st.metric("变化趋势", f"{change:+.1f}%",
+                                  delta_color="inverse" if change > 0 else "normal")
+
+        # 添加前瞻性指导建议
+        st.subheader("前瞻性运行指导建议")
+
+        # 计算趋势
+        current_avg = st.session_state.historical_data['total_CO2eq'].mean()
+        predicted_avg = st.session_state.prediction_data['predicted_CO2eq'].mean()
+        trend = "上升" if predicted_avg > current_avg else "下降"
+        change_percent = abs((predicted_avg - current_avg) / current_avg * 100)
+
+        # 根据趋势提供建议
+        if trend == "上升":
+            st.warning(f"⚠️ 预测显示未来碳排放将{trend}{change_percent:.1f}%")
+            st.info("""
+            **建议措施：**
+            - 检查曝气系统效率，优化曝气量控制
+            - 评估化学药剂投加量，避免过量使用
+            - 加强进水水质监控，预防冲击负荷
+            - 考虑实施节能技术改造
+            """)
+        else:
+            st.success(f"✅ 预测显示未来碳排放将{trend}{change_percent:.1f}%")
+            st.info("""
+            **保持措施：**
+            - 维持当前优化运行参数
+            - 继续监控关键工艺指标
+            - 定期维护设备确保高效运行
+            """)
+
+        # 添加技术投资建议
+        st.subheader("减排技术投资建议")
+        tech_recommendations = {
+            "高效曝气系统": {"减排潜力": "15-25%", "投资回收期": "2-4年", "适用性": "高"},
+            "光伏发电": {"减排潜力": "20-30%", "投资回收期": "5-8年", "适用性": "中"},
+            "污泥厌氧消化": {"减排潜力": "10-20%", "投资回收期": "3-5年", "适用性": "中高"}
+        }
+
+        tech_df = pd.DataFrame(tech_recommendations).T
+        st.dataframe(tech_df)
+    else:
+        st.info("请先进行预测以查看结果")
+
+    # 显示模型状态
+    st.subheader("模型状态")
+    if st.session_state.lstm_predictor is not None:
+        st.success("✅ 模型已加载，可以进行预测")
+
+        # 显示模型基本信息
+        model = st.session_state.lstm_predictor.model
+        if hasattr(model, 'summary'):
+            import io
+            import contextlib
+
+            string_buffer = io.StringIO()
+            with contextlib.redirect_stdout(string_buffer):
+                model.summary()
+            model_summary = string_buffer.getvalue()
+
+            with st.expander("查看模型架构"):
+                st.text(model_summary)
+    else:
+        st.warning("⚠️ 请先加载或训练模型")
+
+    # 添加简单预测方法作为备选
+    if st.session_state.df is not None and st.session_state.lstm_predictor is None:
+        st.info("也可以使用简单预测方法（基于历史平均值）")
+        if st.button("使用简单预测", key="simple_predict_btn"):
+            with st.spinner("正在进行简单预测..."):
+                calculator = CarbonCalculator()
+                simple_prediction = calculator._simple_emission_prediction(st.session_state.df, prediction_days)
+
+                # 显示预测图表
+                df_with_emissions = calculator.calculate_direct_emissions(st.session_state.df)
+                df_with_emissions = calculator.calculate_indirect_emissions(df_with_emissions)
+                df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
+
+                historical_data = df_with_emissions[['日期', 'total_CO2eq']].tail(30)
+                fig = vis.create_carbon_trend_chart(historical_data, simple_prediction)
+                st.plotly_chart(fig, use_container_width=True)
+
+                st.info("这是基于历史平均值的简单预测，精度较低")
+
+# 新增选项卡：减排技术分析
+with tab6:
+    st.header("碳减排技术对比分析")
+
+    # 技术选择
+    selected_techs = st.multiselect(
+        "选择对比技术",
+        ["厌氧消化产沼", "光伏发电", "高效曝气", "热泵技术", "污泥干化", "沼气发电"],
+        default=["厌氧消化产沼", "光伏发电", "高效曝气"]
+    )
+
+    if st.button("运行技术对比分析"):
+        with st.spinner("正在进行技术对比分析..."):
+            calculator = CarbonCalculator()
+            comparison_results = calculator.compare_carbon_techs(
+                selected_techs,
+                st.session_state.df_selected if 'df_selected' in st.session_state else None
+            )
+            st.session_state.tech_comparison_results = comparison_results
+
+            # 显示技术对比图表
+            tech_fig = vis.create_technology_comparison(comparison_results)
+            st.plotly_chart(tech_fig)
+
+            # 显示详细对比表格
+            st.subheader("技术经济性分析")
+            st.dataframe(comparison_results)
+
+    # 显示技术对比图表
+    tech_fig = vis.create_technology_comparison(st.session_state.tech_comparison_data)
+    st.plotly_chart(tech_fig)
+
+    # 技术详情表格
+    st.subheader("减排技术详情")
+    st.dataframe(st.session_state.tech_comparison_data)
+
+    # 技术适用性分析
+    st.subheader("技术适用性分析")
+    selected_tech = st.selectbox(
+        "选择技术查看详情",
+        st.session_state.tech_comparison_data['技术名称'].tolist()
+    )
+
+    tech_details = st.session_state.tech_comparison_data[
+        st.session_state.tech_comparison_data['技术名称'] == selected_tech
+        ].iloc[0]
+
+    st.write(f"**{selected_tech}**")
+    st.write(f"- 预计年减排量: {tech_details['减排量_kgCO2eq']} kgCO2eq")
+    st.write(f"- 投资成本: {tech_details['投资成本_万元']} 万元")
+    st.write(f"- 投资回收期: {tech_details['回收期_年']} 年")
+    st.write(f"- 适用性: {tech_details['适用性']}")
+    st.write(f"- 碳减排贡献率: {tech_details['碳减排贡献率_%']}%")
+    st.write(f"- 能源中和率: {tech_details['能源中和率_%']}%")
+
+    # 碳抵消计算
+    st.subheader("碳抵消计算")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        biogas = st.number_input("沼气发电量(kWh)", value=1000, min_value=0)
+        st.session_state.carbon_offset_data["沼气发电"] = biogas * 2.5
+    with col2:
+        solar = st.number_input("光伏发电量(kWh)", value=500, min_value=0)
+        st.session_state.carbon_offset_data["光伏发电"] = solar * 0.85
+    with col3:
+        heatpump = st.number_input("热泵技术节能量(kWh)", value=300, min_value=0)
+        st.session_state.carbon_offset_data["热泵技术"] = heatpump * 1.2
+    with col4:
+        sludge = st.number_input("污泥资源化量(kgDS)", value=200, min_value=0)
+        st.session_state.carbon_offset_data["污泥资源化"] = sludge * 0.3
+
+    total_offset = sum(st.session_state.carbon_offset_data.values())
+    st.metric("总碳抵消量", f"{total_offset:.2f} kgCO2eq")
+
+# 新增选项卡：因子库管理
+with tab7:
+    st.header("碳排放因子库管理")
+
+    # 检查是否是回退模式
+    if hasattr(st.session_state.factor_db, 'is_fallback') and st.session_state.factor_db.is_fallback:
+        st.warning("⚠️ 当前处于回退模式，使用默认因子值。某些功能可能受限。")
+
+    # 显示当前因子
+    st.subheader("当前碳排放因子（权威来源）")
+    try:
+        factors_df = st.session_state.factor_db.export_factors("temp_factors.csv", format="csv")
+        # 高亮显示关键因子
+        styled_df = factors_df.style.apply(
+            lambda x: ['background-color: #e6f3ff' if x['factor_type'] in ['电力', 'N2O', 'CH4'] else '' for i in x],
+            axis=1
+        )
+        st.dataframe(styled_df, height=300)
+        st.caption("注：高亮因子来源于中国生态环境部官方文件或IPCC第六次评估报告(AR6)。")
+    except Exception as e:
+        st.error(f"获取因子数据失败: {e}")
+
+    # 因子更新界面
+    st.subheader("更新碳排放因子")
+
+    # 在回退模式下禁用更新功能
+    if hasattr(st.session_state.factor_db, 'is_fallback') and st.session_state.factor_db.is_fallback:
+        st.info("回退模式下无法更新因子。请检查数据库连接。")
+    else:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            factor_type = st.selectbox("因子类型", ["电力", "PAC", "PAM", "次氯酸钠", "臭氧", "N2O", "CH4"])
+        with col2:
+            factor_value = st.number_input("因子值", value=0.0, step=0.01)
+        with col3:
+            factor_year = st.selectbox("生效年份", list(range(2020, 2026)))
+
+        if st.button("更新因子"):
+            try:
+                st.session_state.factor_db.update_factor(
+                    factor_type, factor_value, "kgCO2/kg", "中国",
+                    f"{factor_year}-01-01", f"{factor_year}-12-31",
+                    "用户更新", f"{factor_year}年{factor_type}排放因子", "手动更新"
+                )
+                st.success(f"已更新{factor_type} {factor_year}年排放因子: {factor_value}")
+            except Exception as e:
+                st.error(f"更新因子失败: {e}")
+
+    # 因子历史趋势
+    st.subheader("电力排放因子历史趋势")
+    try:
+        electricity_history = st.session_state.factor_db.get_factor_history("电力", "中国")
+        if not electricity_history.empty:
+            fig = px.line(
+                electricity_history, x="effective_date", y="factor_value",
+                title="电力排放因子历史变化", markers=True
+            )
+            fig.update_layout(
+                xaxis_title="生效日期", yaxis_title="排放因子 (kgCO2/kWh)",
+                font=dict(size=14, color="black")
+            )
+            st.plotly_chart(fig)
+        else:
+            st.info("暂无电力排放因子历史数据")
+    except Exception as e:
+        st.error(f"获取电力因子历史失败: {e}")
+
+# 添加JavaScript回调处
+html(
+    """
+    <script>
+    window.addEventListener('message', function(event) {
+        if (event.data.type === 'streamlit:setComponentValue') {
+            window.Streamlit.setComponentValue(event.data.value);
+        }
+    });
+    </script>
+    """,
+    height=0
+)
 
 
-# 使用示例
+# 添加页面卸载时的清理函数
+def cleanup():
+    """清理资源"""
+    if 'factor_db' in st.session_state:
+        # 调用数据库清理方法
+        try:
+            st.session_state.factor_db.__del__()
+        except:
+            pass
+
+
+# 注册清理函数
+import atexit
+
+atexit.register(cleanup)
+
+# 运行应用
 if __name__ == "__main__":
-    # 加载数据
-    data = pd.read_csv("data/simulated_data.csv")
-    data['日期'] = pd.to_datetime(data['日期'])
-
-    # 计算总碳排放（假设已有碳核算结果）
-    calculator = CarbonCalculator()
-    data_with_emissions = calculator.calculate_direct_emissions(data)
-    data_with_emissions = calculator.calculate_indirect_emissions(data_with_emissions)
-    data_with_emissions = calculator.calculate_unit_emissions(data_with_emissions)
-
-    # 训练预测模型
-    predictor = CarbonLSTMPredictor()
-    history = predictor.train(data_with_emissions, 'total_CO2eq', epochs=30)
-
-    print("模型训练完成并保存")
+    # 在开发环境中，Streamlit会自动运行这个文件
+    pass
