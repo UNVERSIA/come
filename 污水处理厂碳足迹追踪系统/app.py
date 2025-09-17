@@ -1541,11 +1541,11 @@ with tab5:
     with train_col2:
         st.info("使用当前数据训练新的LSTM模型。需要先上传数据并确保数据包含足够的日期记录。")
 
-# 在列外部显示训练历史图表（全宽显示）
-if 'training_history' in st.session_state and st.session_state.training_history is not None:
-    st.subheader("训练历史")
-    history_fig = vis.create_training_history_chart(st.session_state.training_history)
-    st.plotly_chart(history_fig, use_container_width=True)
+    # 在列外部显示训练历史图表（全宽显示）
+    if 'training_history' in st.session_state and st.session_state.training_history is not None:
+        st.subheader("训练历史")
+        history_fig = vis.create_training_history_chart(st.session_state.training_history)
+        st.plotly_chart(history_fig, use_container_width=True)
 
     # 第三部分：进行预测
     st.subheader("3. 预测设置")
@@ -1643,7 +1643,6 @@ if 'training_history' in st.session_state and st.session_state.training_history 
                         st.warning("使用简单预测方法生成数据")
                     except Exception as fallback_error:
                         st.error(f"简单预测也失败: {str(fallback_error)}")
-
     with predict_col2:
         st.info("预测2025年全年每月碳排放数据。使用LSTM模型基于2018-2024年历史数据进行预测。")
 
@@ -1838,16 +1837,17 @@ if 'training_history' in st.session_state and st.session_state.training_history 
             # 添加投资优先级建议
             st.info("💡 投资优先级建议：根据投资回收期和减排潜力综合评估，建议优先考虑投资回收期短、减排潜力大的技术")
 
-        # 显示模型状态
-        st.subheader("模型状态")
-        if st.session_state.lstm_predictor is not None and st.session_state.lstm_predictor.model is not None:
-            st.success("✅ 模型已加载，可以进行预测")
-        elif st.session_state.lstm_predictor is not None and st.session_state.lstm_predictor.model is None:
-            st.warning("⚠️ 模型未加载，请先加载或训练模型")
-        else:
-            st.warning("⚠️ 请先加载或训练模型")
+    # 显示模型状态
+    st.subheader("模型状态")
+    if st.session_state.lstm_predictor is not None and st.session_state.lstm_predictor.model is not None:
+        st.success("✅ 模型已加载，可以进行预测")
+    elif st.session_state.lstm_predictor is not None and st.session_state.lstm_predictor.model is None:
+        st.warning("⚠️ 模型未加载，请先加载或训练模型")
+    else:
+        st.warning("⚠️ 请先加载或训练模型")
 
-        # 显示模型基本信息
+    # 显示模型基本信息
+    if st.session_state.lstm_predictor is not None and st.session_state.lstm_predictor.model is not None:
         model = st.session_state.lstm_predictor.model
         if hasattr(model, 'summary'):
             import io
@@ -1860,8 +1860,6 @@ if 'training_history' in st.session_state and st.session_state.training_history 
 
             with st.expander("查看模型架构"):
                 st.text(model_summary)
-    else:
-        st.warning("⚠️ 请先加载或训练模型")
 
     # 添加简单预测方法作为备选
     if st.session_state.df is not None and st.session_state.lstm_predictor is None:
