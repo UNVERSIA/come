@@ -317,10 +317,17 @@ class CarbonLSTMPredictor:
 
         return np.array(X), np.array(y)
 
-    def load_model(self, model_path='models/carbon_lstm.keras'):
+    def load_model(self, model_path=None):
         """加载预训练模型"""
-        # 确保目录存在
-        os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        # 如果没有提供模型路径，使用默认路径
+        if model_path is None:
+            # 获取当前文件所在目录的绝对路径
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            models_dir = os.path.join(current_dir, "models")
+            model_path = os.path.join(models_dir, "carbon_lstm_model.keras")
+
+            # 确保目录存在
+            os.makedirs(os.path.dirname(model_path), exist_ok=True)
 
         # 检查模型文件是否存在
         if not os.path.exists(model_path):
