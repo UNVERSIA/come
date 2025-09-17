@@ -129,6 +129,10 @@ class CarbonLSTMPredictor:
 
     def build_model(self, input_shape):
         """构建LSTM模型 - 使用更兼容的方式"""
+        # 动态确定输入形状
+        if input_shape is None:
+            input_shape = (self.sequence_length, len(self.feature_columns))
+
         model = Sequential([
             LSTM(50, return_sequences=True, input_shape=input_shape),
             Dropout(0.2),
@@ -229,6 +233,18 @@ class CarbonLSTMPredictor:
                     valid_features.append(col)
             else:
                 print(f"警告: 特征列 '{col}' 不存在或全部为NaN值，将跳过")
+
+        # 确保所有特征都有缩放器，即使列不存在
+        for col in self.feature_columns:
+            if col not in self.feature_scalers:
+                self.feature_scalers[col] = MinMaxScaler()
+                # 使用默认值拟合
+                default_value = 0.0
+                if col == '处理水量(m³)':
+                    default_value = 10000.0
+                elif col == '电耗(kWh)':
+                    default_value = 3000.0
+                self.feature_scalers[col].fit(np.array([[default_value]]))
 
         # 如果没有有效特征，抛出错误
         if not valid_features:
@@ -533,6 +549,9 @@ class CarbonLSTMPredictor:
                 # 如果没有有效数据，使用默认范围
                 self.target_scaler.fit([[0], [historical_mean * 2]])
 
+        # 获取最后一天的日期作为基准
+        last_date = df['日期'].max() if '日期' in df.columns else pd.Timestamp.now()
+
         for i in range(steps):
             # 预测下一步
             try:
@@ -569,19 +588,23 @@ class CarbonLSTMPredictor:
                 lower_bounds.append(max(0, pred * 0.8))
                 upper_bounds.append(pred * 1.2)
 
-            # 更新序列 - 使用更简单的方法
-            # 创建一个新的序列，将最后的值向前移动一位
-            new_sequence = np.roll(current_sequence[0], -1, axis=0)
+            # 对于多步预测，我们不更新输入序列，而是使用相同的输入序列进行所有预测
+            # 这是因为我们无法知道未来的特征值，所以保持输入序列不变
+            # 如果需要更准确的多步预测，应该使用递归预测或序列到序列模型
 
-            # 使用预测值更新序列的最后一个位置（假设目标变量是最后一个特征）
-            # 注意：这里假设目标变量不是输入特征的一部分，所以不需要更新
-            # 保持序列的其他部分不变，只更新时间特征（如果有的话）
-
-            # 如果有时间特征，可以在这里更新时间特征
-            # 例如：new_sequence[-1, time_feature_index] = i + 1
-
-            # 更新当前序列
-            current_sequence = np.expand_dims(new_sequence, axis=0)
+        # 生成预测日期（按月生成）
+        if steps == 12:
+            # 生成每月最后一天的日期
+            prediction_dates = []
+            for i in range(1, steps + 1):
+                # 计算下个月的日期
+                next_month = last_date + pd.DateOffset(months=i)
+                # 获取该月的最后一天
+                month_end = pd.Timestamp(year=next_month.year, month=next_month.month, day=1) + pd.offsets.MonthEnd(1)
+                prediction_dates.append(month_end)
+        else:
+            # 如果不是12个月，按天生成日期
+            prediction_dates = [last_date + timedelta(days=i + 1) for i in range(steps)]
 
         # 生成预测日期（按月生成）
         last_date = df['日期'].max()
