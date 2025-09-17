@@ -1441,12 +1441,17 @@ with tab5:
                 if st.session_state.lstm_predictor is None:
                     st.session_state.lstm_predictor = CarbonLSTMPredictor()
 
-                # 尝试多种可能的模型文件路径
+                # 获取当前文件所在目录的绝对路径
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                # 构建模型文件的绝对路径
+                models_dir = os.path.join(current_dir, "models")
+
+                # 尝试多种可能的模型文件路径（使用绝对路径）
                 possible_model_paths = [
-                    "models/carbon_lstm_model.keras",
-                    "models/carbon_lstm_model.h5",
-                    "models/carbon_lstm.keras",
-                    "models/carbon_lstm.h5"
+                    os.path.join(models_dir, "carbon_lstm_model.keras"),
+                    os.path.join(models_dir, "carbon_lstm_model.h5"),
+                    os.path.join(models_dir, "carbon_lstm.keras"),
+                    os.path.join(models_dir, "carbon_lstm.h5")
                 ]
 
                 model_loaded = False
@@ -1507,13 +1512,18 @@ with tab5:
                         if st.session_state.lstm_predictor is None:
                             st.session_state.lstm_predictor = CarbonLSTMPredictor()
 
+                        # 获取当前文件所在目录的绝对路径
+                        current_dir = os.path.dirname(os.path.abspath(__file__))
+                        models_dir = os.path.join(current_dir, "models")
+                        save_path = os.path.join(models_dir, "carbon_lstm_model.keras")
+
                         # 训练模型 - 使用新的保存路径
                         training_history = st.session_state.lstm_predictor.train(
                             df_with_emissions,
                             'total_CO2eq',
                             epochs=50,
                             validation_split=0.2,
-                            save_path='models/carbon_lstm_model.keras'  # 修改保存路径
+                            save_path=save_path  # 使用绝对路径
                         )
 
                         st.success("✅ 模型训练完成并已保存！")
