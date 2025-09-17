@@ -1523,7 +1523,7 @@ with tab4:
             if st.session_state.lstm_predictor.model is None:
                 try:
                     # 尝试加载预训练模型
-                    model_path = "models/carbon_lstm_model.keras"
+                    model_path = "models/carbon_lstm_model.h5"
                     st.session_state.lstm_predictor.load_model(model_path)
                     st.success("✅ 预训练模型加载成功！")
                 except Exception as e:
@@ -1539,22 +1539,30 @@ with tab4:
                         df_with_emissions = calculator.calculate_indirect_emissions(df_with_emissions)
                         df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
 
-                        # 进行预测 - 直接预测月度数据
-                        monthly_prediction = st.session_state.lstm_predictor.predict(
+                        # 进行预测 - 预测365天然后聚合为月度数据
+                        prediction_df = st.session_state.lstm_predictor.predict(
                             df_with_emissions,
                             'total_CO2eq',
-                            steps=12  # 直接预测12个月
+                            steps=365  # 预测一年每天的数据
                         )
 
-                        # 确保预测结果包含日期列
-                        if '日期' not in monthly_prediction.columns:
-                            # 生成2025年的月度日期
-                            start_date = pd.Timestamp('2025-01-01')
-                            monthly_dates = [start_date + pd.DateOffset(months=i) for i in range(12)]
-                            monthly_prediction['日期'] = monthly_dates
+                        # 将日预测数据转换为月预测数据
+                        prediction_df['日期'] = pd.to_datetime(prediction_df['日期'])
+                        prediction_df.set_index('日期', inplace=True)
+
+                        # 按月聚合 - 使用平均值
+                        monthly_prediction = prediction_df.resample('M').agg({
+                            'predicted_CO2eq': 'mean',
+                            'lower_bound': 'mean',
+                            'upper_bound': 'mean'
+                        })
 
                         # 添加年月列用于显示
+                        monthly_prediction.reset_index(inplace=True)
                         monthly_prediction['年月'] = monthly_prediction['日期'].dt.strftime('%Y年%m月')
+
+                        # 只保留2025年的数据
+                        monthly_prediction = monthly_prediction[monthly_prediction['日期'].dt.year == 2025]
 
                         # 存储结果
                         st.session_state.prediction_data = monthly_prediction
@@ -1563,10 +1571,10 @@ with tab4:
 
                         st.success("✅ 预测完成！")
                 except Exception as e:
-                    st.error(f"LSTM预测失败: {str(e)}")
+                    st.error(f"预测失败: {str(e)}")
                     # 使用简单预测作为备选
                     try:
-                        st.info("尝试使用简单预测方法...")
+                        # 修改简单预测也返回月度数据
                         simple_prediction = calculator._simple_emission_prediction(
                             st.session_state.df, 365  # 预测一年
                         )
@@ -1580,10 +1588,8 @@ with tab4:
                             'upper_bound': 'mean'
                         })
                         monthly_simple.reset_index(inplace=True)
-
-                        # 只保留2025年的数据
-                        monthly_simple = monthly_simple[monthly_simple['日期'].dt.year == 2025]
                         monthly_simple['年月'] = monthly_simple['日期'].dt.strftime('%Y年%m月')
+                        monthly_simple = monthly_simple[monthly_simple['日期'].dt.year == 2025]
 
                         st.session_state.prediction_data = monthly_simple
                         st.session_state.historical_data = df_with_emissions
