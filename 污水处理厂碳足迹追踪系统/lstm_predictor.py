@@ -333,10 +333,10 @@ class CarbonLSTMPredictor:
         if not os.path.exists(model_path):
             # 尝试其他可能的模型路径
             possible_paths = [
-                    model_path,
-                    model_path.replace('.keras', '.h5'),
-                    'models/carbon_lstm.h5',
-                    'models/carbon_lstm.weights.h5'
+                model_path,
+                model_path.replace('.keras', '.h5'),
+                'models/carbon_lstm.h5',
+                'models/carbon_lstm.weights.h5'
             ]
 
             found = False
@@ -348,17 +348,17 @@ class CarbonLSTMPredictor:
 
             if not found:
                 logger.warning("未找到预训练模型文件，模型将保持未加载状态")
-                self.model = None  # 明确设置为None，而不是创建新模型
-                return False  # 返回加载失败状态
+                self.model = None
+                return False
 
         # 尝试加载元数据
         metadata_path = model_path.replace('.keras', '_metadata.pkl').replace('.h5', '_metadata.pkl')
         if not os.path.exists(metadata_path):
             # 尝试其他可能的元数据路径
             possible_meta_paths = [
-                    metadata_path,
-                    'models/carbon_lstm_metadata.pkl',
-                    model_path.replace('.keras', '.pkl').replace('.h5', '.pkl')
+                metadata_path,
+                'models/carbon_lstm_metadata.pkl',
+                model_path.replace('.keras', '.pkl').replace('.h5', '.pkl')
             ]
 
             for path in possible_meta_paths:
@@ -382,16 +382,16 @@ class CarbonLSTMPredictor:
                 self.sequence_length = 30
                 self.forecast_days = 7
                 self.feature_columns = [
-                        '处理水量(m³)', '电耗(kWh)', 'PAC投加量(kg)',
-                        'PAM投加量(kg)', '次氯酸钠投加量(kg)',
-                        '进水COD(mg/L)', '出水COD(mg/L)', '进水TN(mg/L)', '出水TN(mg/L)'
+                    '处理水量(m³)', '电耗(kWh)', 'PAC投加量(kg)',
+                    'PAM投加量(kg)', '次氯酸钠投加量(kg)',
+                    '进水COD(mg/L)', '出水COD(mg/L)', '进水TN(mg/L)', '出水TN(mg/L)'
                 ]
 
         try:
             # 尝试直接加载模型
             self.model = load_model(model_path)
             logger.info("模型加载成功")
-            return True  # 返回加载成功状态
+            return True
         except Exception as e:
             # 如果直接加载失败，尝试使用权重和架构
             try:
@@ -399,16 +399,17 @@ class CarbonLSTMPredictor:
                 logger.info("尝试使用备用加载方式...")
 
                 # 尝试加载架构和权重
-                architecture_path = model_path.replace('.keras', '_architecture.json').replace('.h5', '_architecture.json')
+                architecture_path = model_path.replace('.keras', '_architecture.json').replace('.h5',
+                                                                                               '_architecture.json')
                 weights_path = model_path.replace('.keras', '.weights.h5').replace('.h5', '.weights.h5')
 
                 # 如果权重文件不存在，尝试其他可能的路径
                 if not os.path.exists(weights_path):
                     possible_weights = [
-                            weights_path,
-                            model_path.replace('.keras', '.h5').replace('.h5', '.h5'),
-                            'models/carbon_lstm.weights.h5',
-                            'models/carbon_lstm.h5'
+                        weights_path,
+                        model_path.replace('.keras', '.h5').replace('.h5', '.h5'),
+                        'models/carbon_lstm.weights.h5',
+                        'models/carbon_lstm.h5'
                     ]
 
                     for path in possible_weights:
@@ -430,22 +431,11 @@ class CarbonLSTMPredictor:
                     logger.info("使用备用方式加载模型成功!")
                     return True
                 else:
-                    # 重新构建模型结构
-                    self.model = self.build_model((self.sequence_length, len(self.feature_columns)))
-
-                    # 尝试加载权重
-                    if os.path.exists(weights_path):
-                        self.model.load_weights(weights_path)
-                        logger.info("使用权重加载方式成功!")
-                        return True
-                    else:
-                        logger.warning("权重文件不存在，只能使用模型架构")
-                        # 编译模型
-                        self.model.compile(optimizer='adam', loss='mse', metrics=['mae'])
-                        return True
+                    logger.warning("模型架构或权重文件不存在，加载失败")
+                    self.model = None
+                    return False
             except Exception as inner_e:
                 logger.error(f"所有加载方式均失败: {str(inner_e)}")
-                # 作为最后的手段，保持模型为None状态
                 self.model = None
                 return False
 
