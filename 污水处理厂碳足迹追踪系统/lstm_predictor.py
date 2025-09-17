@@ -472,74 +472,57 @@ class CarbonLSTMPredictor:
 
         # 进行预测
         predictions = []
-        current_sequence = X[-1:]  # 使用最后一段序列
+        lower_bounds = []
+        upper_bounds = []
 
-        # 获取最后已知的目标值，用于初始化
+        # 使用最后一段序列作为初始输入
+        current_sequence = X[-1:]
+
+        # 获取最后已知的目标值和历史统计信息
         last_known_value = df[target_column].iloc[-1]
+        historical_values = df[target_column].values
+        historical_mean = np.mean(historical_values)
+        historical_std = np.std(historical_values)
 
         for i in range(steps):
             # 预测下一步
-            pred = self.model.predict(current_sequence, verbose=0)[0][0]
+            pred_scaled = self.model.predict(current_sequence, verbose=0)[0][0]
 
-            # 确保预测值合理（不低于0且不异常高）
-            pred = max(0, pred)
-            pred = min(pred, last_known_value * 3)  # 不超过最后值的3倍
+            # 逆变换预测值
+            try:
+                pred = self.target_scaler.inverse_transform([[pred_scaled]])[0][0]
+            except:
+                # 如果逆变换失败，使用简单外推
+                recent_values = df[target_column].tail(7).values
+                if len(recent_values) > 1:
+                    trend = np.mean(np.diff(recent_values))
+                    pred = recent_values[-1] + trend
+                else:
+                    pred = last_known_value
+
+            # 确保预测值合理（非负且在合理范围内）
+            pred = max(0, pred)  # 确保非负
+            pred = min(pred, historical_mean + 3 * historical_std)  # 不超过历史均值+3倍标准差
 
             predictions.append(pred)
 
-            # 更新序列 - 使用更合理的方法
-            new_row = np.zeros((1, 1, len(self.feature_columns)))
-
-            # 对每个特征进行外推
-            for j, col in enumerate(self.feature_columns):
-                if col == target_column:
-                    # 目标列使用预测值
-                    new_row[0, 0, j] = pred
-                else:
-                    # 其他特征使用趋势外推（基于最近7个时间点）
-                    if len(X) >= 7:
-                        recent_values = [X[-k][-1, j] for k in range(1, 8)]
-                        # 计算加权平均变化率（最近的值权重更高）
-                        weights = [0.1, 0.15, 0.2, 0.25, 0.15, 0.1, 0.05]
-                        changes = []
-                        for k in range(1, len(recent_values)):
-                            change = recent_values[k] - recent_values[k - 1]
-                            changes.append(change * weights[k - 1])
-
-                        avg_change = sum(changes) / sum(weights[:len(changes)])
-                        new_row[0, 0, j] = current_sequence[0, -1, j] + avg_change
-                    else:
-                        # 数据不足时使用最后值
-                        new_row[0, 0, j] = current_sequence[0, -1, j]
-
-            # 更新当前序列
-            current_sequence = np.concatenate([current_sequence[:, 1:, :], new_row], axis=1)
-
-        # 逆变换 - 添加异常值处理
-        try:
-            predictions = self.target_scaler.inverse_transform(np.array(predictions).reshape(-1, 1)).flatten()
-
-            # 确保预测值合理（基于历史数据范围）
-            historical_min = df[target_column].min()
-            historical_max = df[target_column].max()
-            historical_avg = df[target_column].mean()
-
-            for i in range(len(predictions)):
-                if predictions[i] < historical_min * 0.5:
-                    predictions[i] = historical_min * 0.8
-                elif predictions[i] > historical_max * 2:
-                    predictions[i] = historical_max * 1.2
-
-        except Exception as e:
-            print(f"逆变换失败: {e}")
-            # 使用简单线性外推作为备选
-            last_values = df[target_column].tail(7).values
-            if len(last_values) >= 2:
-                trend = np.mean(np.diff(last_values))
-                base_value = last_values[-1]
-                predictions = [base_value + trend * (i + 1) for i in range(steps)]
+            # 计算置信区间（基于历史误差）
+            if len(historical_values) > 10:
+                # 使用历史数据的标准差作为误差估计
+                error_estimate = historical_std * 0.5  # 假设误差为历史标准差的一半
+                lower_bounds.append(max(0, pred - error_estimate))
+                upper_bounds.append(pred + error_estimate)
             else:
-                predictions = [last_known_value] * steps
+                # 数据不足时使用固定比例
+                lower_bounds.append(max(0, pred * 0.8))
+                upper_bounds.append(pred * 1.2)
+
+            # 更新序列 - 使用更保守的方法
+            # 只更新目标变量，其他特征保持最后已知值
+            new_row = current_sequence[0, -1, :].copy().reshape(1, 1, -1)
+
+            # 更新当前序列（滑动窗口）
+            current_sequence = np.concatenate([current_sequence[:, 1:, :], new_row], axis=1)
 
         # 生成预测日期（从最后日期开始的下一个月）
         last_date = df['日期'].max()
@@ -548,19 +531,10 @@ class CarbonLSTMPredictor:
         # 创建结果DataFrame
         result_df = pd.DataFrame({
             '日期': prediction_dates,
-            'predicted_CO2eq': predictions
+            'predicted_CO2eq': predictions,
+            'lower_bound': lower_bounds,
+            'upper_bound': upper_bounds
         })
-
-        # 计算置信区间（基于历史误差）
-        if hasattr(self, 'history_mae'):
-            mae = self.history_mae
-        else:
-            # 默认使用目标变量标准差的20%作为误差估计
-            target_std = df[target_column].std()
-            mae = target_std * 0.2
-
-        result_df['lower_bound'] = result_df['predicted_CO2eq'] * (1 - mae)
-        result_df['upper_bound'] = result_df['predicted_CO2eq'] * (1 + mae)
 
         return result_df
 
