@@ -501,8 +501,12 @@ class CarbonLSTMPredictor:
             df = calculator.calculate_indirect_emissions(df)
             df = calculator.calculate_unit_emissions(df)
 
-        # 准备特征数据
-        X = self._prepare_features(df)
+        # 准备特征数据 - 使用最后30天数据
+        if len(df) < self.sequence_length:
+            # 如果数据不足，使用所有可用数据
+            X = self._prepare_features(df)
+        else:
+            X = self._prepare_features(df.tail(self.sequence_length))
 
         if X is None or len(X) == 0:
             raise ValueError("无法准备特征数据进行预测")
@@ -515,11 +519,19 @@ class CarbonLSTMPredictor:
         # 使用最后一段序列作为初始输入
         current_sequence = X[-1:]
 
-        # 获取最后已知的目标值和历史统计信息
-        last_known_value = df[target_column].iloc[-1]
+        # 获取历史统计信息
         historical_values = df[target_column].values
         historical_mean = np.mean(historical_values) if len(historical_values) > 0 else 1000
         historical_std = np.std(historical_values) if len(historical_values) > 0 else historical_mean * 0.2
+
+        # 确保目标缩放器已拟合
+        if not hasattr(self.target_scaler, 'n_samples_seen_') or self.target_scaler.n_samples_seen_ == 0:
+            target_values = df[target_column].dropna().values.reshape(-1, 1)
+            if len(target_values) > 0:
+                self.target_scaler.fit(target_values)
+            else:
+                # 如果没有有效数据，使用默认范围
+                self.target_scaler.fit([[0], [historical_mean * 2]])
 
         for i in range(steps):
             # 预测下一步
@@ -528,20 +540,10 @@ class CarbonLSTMPredictor:
             except Exception as e:
                 print(f"模型预测错误: {e}")
                 # 如果预测失败，使用历史平均值
-                pred_scaled = 0.5  # 默认缩放值
+                pred_scaled = self.target_scaler.transform([[historical_mean]])[0][0] if historical_mean > 0 else 0.5
 
             # 逆变换预测值
             try:
-                # 确保target_scaler已拟合
-                if not hasattr(self.target_scaler, 'n_samples_seen_') or self.target_scaler.n_samples_seen_ == 0:
-                    # 如果target_scaler未拟合，使用历史数据拟合
-                    target_values = df[target_column].dropna().values.reshape(-1, 1)
-                    if len(target_values) > 0:
-                        self.target_scaler.fit(target_values)
-                    else:
-                        # 如果没有有效数据，使用默认范围
-                        self.target_scaler.fit([[0], [historical_mean * 2]])
-
                 pred = self.target_scaler.inverse_transform([[pred_scaled]])[0][0]
             except Exception as e:
                 print(f"逆变换失败: {e}")
@@ -552,14 +554,14 @@ class CarbonLSTMPredictor:
             pred = max(0, pred)  # 确保非负
             # 不超过历史均值±3倍标准差范围
             pred = min(pred, historical_mean + 3 * historical_std)
-            pred = max(pred, historical_mean - 3 * historical_std)
+            pred = max(pred, max(0, historical_mean - 3 * historical_std))
 
             predictions.append(pred)
 
             # 计算置信区间（基于历史误差）
             if len(historical_values) > 10:
                 # 使用历史数据的标准差作为误差估计
-                error_estimate = historical_std * 0.5  # 假设误差为历史标准差的一半
+                error_estimate = historical_std * 0.3  # 调整误差系数
                 lower_bounds.append(max(0, pred - error_estimate))
                 upper_bounds.append(pred + error_estimate)
             else:
@@ -567,29 +569,23 @@ class CarbonLSTMPredictor:
                 lower_bounds.append(max(0, pred * 0.8))
                 upper_bounds.append(pred * 1.2)
 
-            # 更新序列 - 使用更保守的方法
-            # 只更新目标变量，其他特征保持最后已知值
-            # 创建一个新的序列，将预测值添加到特征中
+            # 更新序列 - 使用更简单的方法
+            # 创建一个新的序列，将最后的值向前移动一位
             new_sequence = np.roll(current_sequence[0], -1, axis=0)
 
-            # 使用移动平均来更新序列，而不是直接使用预测值
-            # 这有助于保持序列的稳定性
-            moving_avg_factor = 0.2  # 移动平均因子
-            if i == 0:
-                # 第一次预测，使用最后已知值的加权平均
-                new_sequence[-1, :] = current_sequence[0, -1, :] * (1 - moving_avg_factor) + \
-                                      current_sequence[0, -2, :] * moving_avg_factor
-            else:
-                # 后续预测，使用上一次预测值的加权平均
-                new_sequence[-1, :] = current_sequence[0, -1, :] * (1 - moving_avg_factor) + \
-                                      current_sequence[0, -2, :] * moving_avg_factor
+            # 使用预测值更新序列的最后一个位置（假设目标变量是最后一个特征）
+            # 注意：这里假设目标变量不是输入特征的一部分，所以不需要更新
+            # 保持序列的其他部分不变，只更新时间特征（如果有的话）
+
+            # 如果有时间特征，可以在这里更新时间特征
+            # 例如：new_sequence[-1, time_feature_index] = i + 1
 
             # 更新当前序列
             current_sequence = np.expand_dims(new_sequence, axis=0)
 
-        # 生成预测日期（从最后日期开始的下一个月）
+        # 生成预测日期（从最后日期开始的下一天）
         last_date = df['日期'].max()
-        prediction_dates = [last_date + pd.DateOffset(months=i + 1) for i in range(steps)]
+        prediction_dates = [last_date + timedelta(days=i + 1) for i in range(steps)]
 
         # 创建结果DataFrame
         result_df = pd.DataFrame({
@@ -605,14 +601,20 @@ class CarbonLSTMPredictor:
         return result_df
 
     def _prepare_features(self, df):
-        """准备特征数据用于预测"""
-        if len(df) < self.sequence_length:
+        """准备特征数据用于预测 - 改进版"""
+        if df is None or df.empty:
             return None
+
+        if len(df) < self.sequence_length:
+            # 如果数据不足，使用所有可用数据并填充
+            pad_length = self.sequence_length - len(df)
+            padded_df = pd.concat([df] * (pad_length // len(df) + 1), ignore_index=True)
+            df = padded_df.head(self.sequence_length)
 
         # 确保所有特征列都存在
         for col in self.feature_columns:
             if col not in df.columns:
-                # 使用均值填充缺失特征
+                # 使用默认值填充缺失特征
                 if col == '处理水量(m³)':
                     df[col] = 10000  # 默认处理水量
                 elif col == '电耗(kWh)':
@@ -634,66 +636,55 @@ class CarbonLSTMPredictor:
 
         # 创建序列
         sequences = []
-        for i in range(self.sequence_length, len(df)):
-            seq = []
-            valid_sequence = True
 
-            for col in self.feature_columns:
-                # 获取序列数据
-                col_data = df[col].iloc[i - self.sequence_length:i].values
+        # 为每个特征创建/获取缩放器
+        for col in self.feature_columns:
+            if col not in self.feature_scalers:
+                self.feature_scalers[col] = MinMaxScaler()
 
-                # 处理NaN值
-                if np.isnan(col_data).any():
-                    col_mean = np.nanmean(col_data)
-                    if np.isnan(col_mean):  # 如果均值也是NaN，使用列均值或默认值
-                        col_mean = df[col].mean() if not np.isnan(df[col].mean()) else 0
-                    col_data = np.where(np.isnan(col_data), col_mean, col_data)
+                # 使用当前数据拟合缩放器
+                col_values = df[col].values.reshape(-1, 1)
+                if len(col_values) > 0:
+                    self.feature_scalers[col].fit(col_values)
 
-                # 检查数据有效性
-                if np.isnan(col_data).any() or len(col_data) != self.sequence_length:
-                    valid_sequence = False
-                    break
+        # 准备单个序列
+        seq = []
+        valid_sequence = True
 
-                # 缩放数据
-                if col in self.feature_scalers:
-                    try:
-                        # 确保缩放器已拟合
-                        if not hasattr(self.feature_scalers[col], 'n_samples_seen_') or self.feature_scalers[
-                            col].n_samples_seen_ == 0:
-                            # 如果缩放器未拟合，使用当前数据拟合
-                            col_values = df[col].dropna().values.reshape(-1, 1)
-                            if len(col_values) > 0:
-                                self.feature_scalers[col].fit(col_values)
-                            else:
-                                # 如果没有有效数据，使用默认范围
-                                self.feature_scalers[col].fit([[0], [10000 if col == '处理水量(m³)' else 1000]])
+        for col in self.feature_columns:
+            # 获取序列数据
+            col_data = df[col].iloc[-self.sequence_length:].values
 
-                        scaled_data = self.feature_scalers[col].transform(col_data.reshape(-1, 1)).flatten()
-                    except Exception as e:
-                        print(f"缩放特征 {col} 时出错: {e}")
-                        # 如果缩放失败，使用0填充
-                        scaled_data = np.zeros(self.sequence_length)
-                else:
-                    # 如果没有该特征的缩放器，创建并拟合一个
-                    self.feature_scalers[col] = MinMaxScaler()
-                    col_values = df[col].dropna().values.reshape(-1, 1)
-                    if len(col_values) > 0:
-                        self.feature_scalers[col].fit(col_values)
-                    else:
-                        self.feature_scalers[col].fit([[0], [10000 if col == '处理水量(m³)' else 1000]])
+            # 处理NaN值
+            if np.isnan(col_data).any():
+                col_mean = np.nanmean(col_data)
+                if np.isnan(col_mean):  # 如果均值也是NaN，使用列均值或默认值
+                    col_mean = df[col].mean() if not np.isnan(df[col].mean()) else 0
+                col_data = np.where(np.isnan(col_data), col_mean, col_data)
 
-                    scaled_data = self.feature_scalers[col].transform(col_data.reshape(-1, 1)).flatten()
+            # 检查数据有效性
+            if np.isnan(col_data).any() or len(col_data) != self.sequence_length:
+                valid_sequence = False
+                break
 
-                seq.append(scaled_data)
+            # 缩放数据
+            try:
+                scaled_data = self.feature_scalers[col].transform(col_data.reshape(-1, 1)).flatten()
+            except Exception as e:
+                print(f"缩放特征 {col} 时出错: {e}")
+                # 如果缩放失败，使用0填充
+                scaled_data = np.zeros(self.sequence_length)
 
-            # 只有所有特征都有效时才添加序列
-            if valid_sequence:
-                try:
-                    stacked_seq = np.stack(seq, axis=1)
-                    sequences.append(stacked_seq)
-                except Exception as e:
-                    print(f"堆叠序列时出错: {e}")
-                    continue
+            seq.append(scaled_data)
+
+        # 只有所有特征都有效时才添加序列
+        if valid_sequence:
+            try:
+                stacked_seq = np.stack(seq, axis=1)
+                sequences.append(stacked_seq)
+            except Exception as e:
+                print(f"堆叠序列时出错: {e}")
+                return None
 
         return np.array(sequences) if sequences else None
 
