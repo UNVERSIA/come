@@ -26,10 +26,10 @@ def create_pretrained_model():
         data_with_emissions,
         'total_CO2eq',
         epochs=50,
-        save_path='models/carbon_lstm.keras'  # 使用新的Keras格式
+        save_path='models/carbon_lstm_model.keras'  # 修改保存路径与app.py一致
     )
 
-    print("预训练模型已创建并保存到 models/carbon_lstm.keras")
+    print("预训练模型已创建并保存到 models/carbon_lstm_model.keras")
 
 if __name__ == "__main__":
     create_pretrained_model()
