@@ -317,43 +317,34 @@ class CarbonLSTMPredictor:
 
     def load_model(self, model_path='models/carbon_lstm.keras'):
         """加载预训练模型"""
-        # 添加路径前缀
-        if not model_path.startswith('./污水处理厂碳足迹追踪系统/'):
-            model_path = f'./污水处理厂碳足迹追踪系统/{model_path}'
-
-        # 检查文件是否存在
-        if not os.path.exists(model_path):
-            # 尝试不带前缀的路径
-            alt_path = model_path.replace('./污水处理厂碳足迹追踪系统/', '')
-            if os.path.exists(alt_path):
-                model_path = alt_path
+        # 确保目录存在
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
 
         # 检查模型文件是否存在
         if not os.path.exists(model_path):
-            # 尝试加载.h5格式的旧模型（兼容性）
-            h5_path = model_path.replace('.keras', '.h5')
-            if os.path.exists(h5_path):
-                model_path = h5_path
-            else:
-                # 如果都没有找到，尝试其他可能的路径
-                possible_paths = [
-                    model_path,
-                    h5_path,
-                    model_path.replace('.keras', '.weights.h5'),
-                    'models/carbon_lstm.h5',
-                    'models/carbon_lstm.weights.h5'
-                ]
+            # 尝试其他可能的模型路径
+            possible_paths = [
+                model_path,
+                model_path.replace('.keras', '.h5'),
+                'models/carbon_lstm.h5',
+                'models/carbon_lstm.weights.h5'
+            ]
 
-                found = False
-                for path in possible_paths:
-                    if os.path.exists(path):
-                        model_path = path
-                        found = True
-                        break
+            found = False
+            for path in possible_paths:
+                if os.path.exists(path):
+                    model_path = path
+                    found = True
+                    break
 
-                if not found:
-                    raise FileNotFoundError(f"模型文件不存在，尝试了以下路径: {possible_paths}")
+            if not found:
+                logger.warning("未找到预训练模型文件，将创建新模型")
+                # 创建新模型
+                self.model = self.build_model((self.sequence_length, len(self.feature_columns)))
+                self.model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+                return
 
+        # 尝试加载元数据
         metadata_path = model_path.replace('.keras', '_metadata.pkl').replace('.h5', '_metadata.pkl')
         if not os.path.exists(metadata_path):
             # 尝试其他可能的元数据路径
@@ -363,33 +354,28 @@ class CarbonLSTMPredictor:
                 model_path.replace('.keras', '.pkl').replace('.h5', '.pkl')
             ]
 
-            found_meta = False
             for path in possible_meta_paths:
                 if os.path.exists(path):
                     metadata_path = path
-                    found_meta = True
                     break
 
-            if not found_meta:
-                raise FileNotFoundError(f"元数据文件不存在，尝试了以下路径: {possible_meta_paths}")
-
-        # 先加载元数据
-        try:
-            metadata = joblib.load(metadata_path)
-            self.feature_scalers = metadata['feature_scalers']
-            self.sequence_length = metadata['sequence_length']
-            self.forecast_days = metadata['forecast_days']
-            self.feature_columns = metadata['feature_columns']
-        except Exception as e:
-            logger.warning(f"加载元数据失败: {str(e)}")
-            # 设置默认值
-            self.sequence_length = 30
-            self.forecast_days = 7
-            self.feature_columns = [
-                '处理水量(m³)', '电耗(kWh)', 'PAC投加量(kg)',
-                'PAM投加量(kg)', '次氯酸钠投加量(kg)',
-                '进水COD(mg/L)', '出水COD(mg/L)', '进水TN(mg/L)', '出水TN(mg/L)'
-            ]
+        if os.path.exists(metadata_path):
+            try:
+                metadata = joblib.load(metadata_path)
+                self.feature_scalers = metadata['feature_scalers']
+                self.sequence_length = metadata['sequence_length']
+                self.forecast_days = metadata['forecast_days']
+                self.feature_columns = metadata['feature_columns']
+            except Exception as e:
+                logger.warning(f"加载元数据失败: {str(e)}")
+                # 设置默认值
+                self.sequence_length = 30
+                self.forecast_days = 7
+                self.feature_columns = [
+                    '处理水量(m³)', '电耗(kWh)', 'PAC投加量(kg)',
+                    'PAM投加量(kg)', '次氯酸钠投加量(kg)',
+                    '进水COD(mg/L)', '出水COD(mg/L)', '进水TN(mg/L)', '出水TN(mg/L)'
+                ]
 
         try:
             # 尝试直接加载模型
@@ -642,14 +628,27 @@ class CarbonLSTMPredictor:
             'predicted_CO2eq': all_predictions
         })
 
-        # 6. 计算科学合理的置信区间
-        # 使用历史预测误差的标准差，考虑趋势不确定性
-        historical_errors = []
+        # 6. 计算科学合理的置信区间 - 修复版
+        # 使用更稳健的方法计算置信区间
         if len(historical_data) > self.sequence_length:
             # 使用历史数据进行回测，计算预测误差
-            for i in range(self.sequence_length, len(historical_data)):
+            historical_errors = []
+            valid_backtests = 0
+
+            # 限制回测次数以提高性能
+            max_backtests = min(50, len(historical_data) - self.sequence_length)
+            step_size = max(1, (len(historical_data) - self.sequence_length) // max_backtests)
+
+            for i in range(self.sequence_length, len(historical_data), step_size):
+                if i >= len(historical_data):
+                    break
+
                 train_data = historical_data.iloc[:i]
                 actual_value = historical_data.iloc[i][target_column]
+
+                # 确保有足够的数据
+                if len(train_data) < self.sequence_length:
+                    continue
 
                 # 使用最近sequence_length天数据预测
                 X_test = []
@@ -658,24 +657,48 @@ class CarbonLSTMPredictor:
                 for col in self.feature_columns:
                     if col in test_sequence.columns and col in self.feature_scalers:
                         col_data = test_sequence[col].values[-self.sequence_length:]
-                        scaled_data = self.feature_scalers[col].transform(col_data.reshape(-1, 1))
-                        X_test.append(scaled_data.flatten())
 
-                X_test = np.stack(X_test, axis=1)
-                X_test = X_test.reshape(1, self.sequence_length, len(self.feature_columns))
+                        # 处理NaN值
+                        if np.isnan(col_data).any():
+                            col_mean = np.nanmean(col_data)
+                            col_data = np.where(np.isnan(col_data), col_mean, col_data)
+
+                        try:
+                            scaled_data = self.feature_scalers[col].transform(col_data.reshape(-1, 1))
+                            X_test.append(scaled_data.flatten())
+                        except:
+                            # 如果缩放失败，使用0填充
+                            scaled_data = np.zeros((self.sequence_length, 1))
+                            X_test.append(scaled_data.flatten())
+
+                if not X_test or len(X_test) != len(self.feature_columns):
+                    continue
 
                 try:
+                    X_test = np.stack(X_test, axis=1)
+                    X_test = X_test.reshape(1, self.sequence_length, len(self.feature_columns))
+
                     scaled_pred = self.model.predict(X_test, verbose=0)[0][0]
                     prediction = self.target_scaler.inverse_transform([[scaled_pred]])[0][0]
-                    error = abs(prediction - actual_value) / actual_value if actual_value > 0 else 0
-                    historical_errors.append(error)
+
+                    # 只计算相对误差如果实际值大于0
+                    if actual_value > 0:
+                        error = abs(prediction - actual_value) / actual_value
+                        historical_errors.append(error)
+                        valid_backtests += 1
                 except:
                     continue
 
-        # 计算平均相对误差
-        if historical_errors:
-            mean_error = np.mean(historical_errors)
-            std_error = np.std(historical_errors)
+            # 确保有足够的有效回测
+            if valid_backtests >= 10:
+                mean_error = np.mean(historical_errors)
+                std_error = np.std(historical_errors)
+            else:
+                # 使用基于数据变异性的默认误差估计
+                target_values = historical_data[target_column].values
+                target_var = np.std(target_values) / np.mean(target_values) if np.mean(target_values) > 0 else 0.2
+                mean_error = max(0.1, min(0.3, target_var * 0.8))  # 10%-30%的误差范围
+                std_error = mean_error * 0.5
         else:
             # 默认误差估计
             mean_error = 0.15  # 15%的平均误差
@@ -684,13 +707,18 @@ class CarbonLSTMPredictor:
         # 置信区间考虑预测步长的增加而扩大（不确定性随时间增加）
         confidence_factors = []
         for i in range(steps):
-            # 不确定性随预测步长线性增加
-            uncertainty_factor = 1 + (i / steps) * 2  # 最终不确定性增加到3倍
+            # 不确定性随预测步长增加 - 使用S形曲线而不是线性增加
+            # 前30天增加较快，之后趋于平稳
+            if i < 30:
+                uncertainty_factor = 1 + (i / 30) * 1.5  # 前30天增加到2.5倍
+            else:
+                uncertainty_factor = 2.5 + ((i - 30) / (steps - 30)) * 0.5  # 之后缓慢增加到3倍
+
             confidence_factors.append(uncertainty_factor)
 
-        # 计算上下界
+        # 计算上下界 - 确保不为零且合理
         result_df['lower_bound'] = [
-            max(0, pred * (1 - mean_error * factor - std_error))
+            max(1, pred * (1 - mean_error * factor - std_error))  # 确保不小于1
             for pred, factor in zip(result_df['predicted_CO2eq'], confidence_factors)
         ]
         result_df['upper_bound'] = [
@@ -698,6 +726,27 @@ class CarbonLSTMPredictor:
             for pred, factor in zip(result_df['predicted_CO2eq'], confidence_factors)
         ]
 
+        # 添加季节性调整 - 基于历史数据的月度模式
+        if len(historical_data) > 365:  # 至少有1年数据
+            # 分析历史月度模式
+            historical_data['月份'] = historical_data['日期'].dt.month
+            monthly_pattern = historical_data.groupby('月份')[target_column].mean()
+            yearly_avg = monthly_pattern.mean()
+
+            if yearly_avg > 0:
+                # 计算每月相对于年平均的比率
+                monthly_ratios = monthly_pattern / yearly_avg
+
+                # 应用月度模式到预测
+                for i, row in result_df.iterrows():
+                    month = row['日期'].month
+                    if month in monthly_ratios:
+                        ratio = monthly_ratios[month]
+                        # 适度调整预测值（不完全遵循历史模式）
+                        adjustment = 0.3  # 只应用30%的季节性调整
+                        result_df.at[i, 'predicted_CO2eq'] = row['predicted_CO2eq'] * (1 + adjustment * (ratio - 1))
+                        result_df.at[i, 'lower_bound'] = row['lower_bound'] * (1 + adjustment * (ratio - 1))
+                        result_df.at[i, 'upper_bound'] = row['upper_bound'] * (1 + adjustment * (ratio - 1))
         return result_df
 
     def generate_future_dates(self, last_date, days=7):
