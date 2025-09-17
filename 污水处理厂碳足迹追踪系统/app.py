@@ -1441,31 +1441,47 @@ with tab5:
                 if st.session_state.lstm_predictor is None:
                     st.session_state.lstm_predictor = CarbonLSTMPredictor()
 
-                # 尝试加载预训练模型
-                model_path = "models/carbon_lstm_model.keras"
-                weights_path = "models/carbon_lstm_model.weights.h5"
-                architecture_path = "models/carbon_lstm_model_architecture.json"
+                # 尝试多种可能的模型文件路径
+                possible_model_paths = [
+                    "models/carbon_lstm_model.keras",
+                    "models/carbon_lstm_model.h5",
+                    "models/carbon_lstm.keras",
+                    "models/carbon_lstm.h5"
+                ]
 
-                # 检查模型文件是否存在
-                model_exists = os.path.exists(model_path)
-                weights_and_arch_exists = os.path.exists(weights_path) and os.path.exists(architecture_path)
+                model_loaded = False
+                loaded_path = None
 
-                if not model_exists and not weights_and_arch_exists:
-                    st.warning("⚠️ 未找到预训练模型，请先训练模型")
-                    # 确保预测器状态为未加载
-                    st.session_state.lstm_predictor.model = None
+                # 尝试按优先级顺序加载模型
+                for model_path in possible_model_paths:
+                    if os.path.exists(model_path):
+                        try:
+                            st.session_state.lstm_predictor.load_model(model_path)
+                            if st.session_state.lstm_predictor.model is not None:
+                                model_loaded = True
+                                loaded_path = model_path
+                                break
+                        except Exception as e:
+                            st.warning(f"尝试加载模型 {model_path} 失败: {str(e)}")
+                            continue
+
+                if model_loaded:
+                    st.success(f"✅ 预训练模型加载成功！从 {loaded_path} 加载")
                 else:
-                    # 尝试加载模型
-                    st.session_state.lstm_predictor.load_model(model_path)
+                    # 如果直接加载失败，尝试使用create_pretrained_model.py创建默认模型
+                    try:
+                        from create_pretrained_model import create_pretrained_model
 
-                    # 检查模型是否成功加载
-                    if st.session_state.lstm_predictor.model is not None:
-                        if model_exists:
-                            st.success("✅ 预训练模型加载成功！")
-                        else:
-                            st.success("✅ 使用权重和架构加载模型成功！")
-                    else:
-                        st.warning("⚠️ 模型加载失败，请先训练模型")
+                        with st.spinner("未找到预训练模型，正在创建默认模型..."):
+                            create_pretrained_model()
+                            # 尝试加载新创建的模型
+                            st.session_state.lstm_predictor.load_model("models/carbon_lstm_model.keras")
+                            if st.session_state.lstm_predictor.model is not None:
+                                st.success("✅ 已创建并加载默认预训练模型！")
+                            else:
+                                st.warning("⚠️ 创建默认模型失败，请先训练模型")
+                    except Exception as e:
+                        st.warning("⚠️ 未找到预训练模型，请先训练模型")
             except Exception as e:
                 st.error(f"加载模型失败: {str(e)}")
                 # 确保预测器状态为未加载
