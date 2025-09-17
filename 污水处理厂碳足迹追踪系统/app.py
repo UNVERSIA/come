@@ -1536,11 +1536,21 @@ with tab5:
     with train_col2:
         st.info("使用当前数据训练新的LSTM模型。需要先上传数据并确保数据包含足够的日期记录。")
 
-    # 在训练按钮代码块后添加以下内容（确保不在任何列内）
+    # 在预测按钮代码块后添加以下内容（确保不在任何列内）
     if st.session_state.get('training_history') is not None:
         st.subheader("训练历史")
         history_fig = vis.create_training_history_chart(st.session_state.training_history)
         st.plotly_chart(history_fig, use_container_width=True)
+
+    # 添加模型状态检查
+    if st.session_state.lstm_predictor is not None and st.session_state.lstm_predictor.model is not None:
+        # 检查模型输入形状是否与特征数量匹配
+        expected_features = len(st.session_state.lstm_predictor.feature_columns)
+        actual_input_shape = st.session_state.lstm_predictor.model.input_shape
+        if actual_input_shape[2] != expected_features:
+            st.warning(
+                f"⚠️ 模型输入形状不匹配: 预期 {expected_features} 个特征，但模型有 {actual_input_shape[2]} 个输入特征")
+            st.info("建议重新训练模型以确保输入形状正确")
 
     # 第三部分：进行预测
     st.subheader("3. 预测设置")
