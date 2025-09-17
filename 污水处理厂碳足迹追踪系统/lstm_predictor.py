@@ -142,7 +142,7 @@ class CarbonLSTMPredictor:
         return model
 
     def train(self, df, target_column='total_CO2eq', epochs=50, batch_size=32,
-              save_path='models/carbon_lstm.keras'):
+              validation_split=0.2, save_path='models/carbon_lstm.keras'):
         """训练模型"""
         # 确保目录存在
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
@@ -156,7 +156,7 @@ class CarbonLSTMPredictor:
         # 构建并训练模型
         self.model = self.build_model((X.shape[1], X.shape[2]))
         history = self.model.fit(X, y, epochs=epochs, batch_size=batch_size,
-                                 validation_split=0.2, verbose=1)
+                                 validation_split=validation_split, verbose=1)
 
         # 保存模型和缩放器 - 使用新的Keras格式
         self.model.save(save_path)
