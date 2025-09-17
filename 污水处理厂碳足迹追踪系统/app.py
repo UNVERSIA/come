@@ -1427,35 +1427,35 @@ with tab4:
     else:  # 这里应该是与第1291行的if语句对齐
         st.warning("请先上传运行数据")
 
-    with tab5:
-        st.header("碳排放趋势预测")
+with tab5:
+    st.header("碳排放趋势预测")
 
-        # 第一部分：加载预训练模型
-        st.subheader("1. 模型管理")
-        load_col1, load_col2 = st.columns([1, 3])
-        with load_col1:
-            if st.button("加载预训练模型", key="load_model_btn"):
-                try:
-                    # 初始化LSTM预测器
-                    if st.session_state.lstm_predictor is None:
-                        st.session_state.lstm_predictor = CarbonLSTMPredictor()
+    # 第一部分：加载预训练模型
+    st.subheader("1. 模型管理")
+    load_col1, load_col2 = st.columns([1, 3])
+    with load_col1:
+        if st.button("加载预训练模型", key="load_model_btn"):
+            try:
+                # 初始化LSTM预测器
+                if st.session_state.lstm_predictor is None:
+                    st.session_state.lstm_predictor = CarbonLSTMPredictor()
 
-                    # 尝试加载预训练模型
-                    model_path = "models/carbon_lstm_model.keras"
-                    if os.path.exists(model_path):
-                        st.session_state.lstm_predictor.load_model(model_path)
-                        st.success("✅ 预训练模型加载成功！")
+                # 尝试加载预训练模型
+                model_path = "models/carbon_lstm_model.keras"
+                if os.path.exists(model_path):
+                    st.session_state.lstm_predictor.load_model(model_path)
+                    st.success("✅ 预训练模型加载成功！")
+                else:
+                    # 如果主模型文件不存在，尝试加载权重和架构
+                    weights_path = "models/carbon_lstm_model.weights.h5"
+                    architecture_path = "models/carbon_lstm_model_architecture.json"
+                    if os.path.exists(weights_path) and os.path.exists(architecture_path):
+                        st.session_state.lstm_predictor.load_model(model_path)  # 仍然传递主路径
+                        st.success("✅ 使用权重和架构加载模型成功！")
                     else:
-                        # 如果主模型文件不存在，尝试加载权重和架构
-                        weights_path = "models/carbon_lstm_model.weights.h5"
-                        architecture_path = "models/carbon_lstm_model_architecture.json"
-                        if os.path.exists(weights_path) and os.path.exists(architecture_path):
-                            st.session_state.lstm_predictor.load_model(model_path)  # 仍然传递主路径
-                            st.success("✅ 使用权重和架构加载模型成功！")
-                        else:
-                            st.warning("⚠️ 未找到预训练模型，请先训练模型")
-                except Exception as e:
-                    st.error(f"加载模型失败: {str(e)}")
+                        st.warning("⚠️ 未找到预训练模型，请先训练模型")
+            except Exception as e:
+                st.error(f"加载模型失败: {str(e)}")
     with load_col2:
         st.info("加载已训练好的LSTM模型进行预测。如果模型不存在，将创建一个新的未训练模型。")
 
@@ -1703,8 +1703,6 @@ with tab4:
 
         tech_df = pd.DataFrame(tech_recommendations).T
         st.dataframe(tech_df)
-    else:
-        st.info("请先进行预测以查看结果")
 
     # 显示模型状态
     st.subheader("模型状态")
