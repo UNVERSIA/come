@@ -917,3 +917,70 @@ def create_monthly_trend_chart(historical_data, selected_year=None):
         xaxis=dict(tickmode='linear', dtick=1, range=[0.5, 12.5])  # 1到12月
     )
     return fig
+
+
+def create_training_history_chart(history):
+    """创建训练历史图表"""
+    if not history:
+        return go.Figure()
+
+    fig = go.Figure()
+
+    # 添加训练损失曲线
+    fig.add_trace(go.Scatter(
+        y=history.history['loss'],
+        mode='lines',
+        name='训练损失',
+        line=dict(color='blue', width=2)
+    ))
+
+    # 添加验证损失曲线（如果存在）
+    if 'val_loss' in history.history:
+        fig.add_trace(go.Scatter(
+            y=history.history['val_loss'],
+            mode='lines',
+            name='验证损失',
+            line=dict(color='orange', width=2)
+        ))
+
+    # 添加MAE曲线（如果存在）
+    if 'mae' in history.history:
+        fig.add_trace(go.Scatter(
+            y=history.history['mae'],
+            mode='lines',
+            name='训练MAE',
+            line=dict(color='green', width=2),
+            yaxis='y2'
+        ))
+
+    # 添加验证MAE曲线（如果存在）
+    if 'val_mae' in history.history:
+        fig.add_trace(go.Scatter(
+            y=history.history['val_mae'],
+            mode='lines',
+            name='验证MAE',
+            line=dict(color='red', width=2),
+            yaxis='y2'
+        ))
+
+    fig.update_layout(
+        title="模型训练历史",
+        xaxis_title="训练轮次",
+        yaxis_title="损失值",
+        yaxis2=dict(
+            title="MAE值",
+            overlaying='y',
+            side='right'
+        ),
+        font=dict(size=14, color="black"),
+        plot_bgcolor="rgba(245, 245, 245, 1)",
+        paper_bgcolor="rgba(245, 245, 245, 1)",
+        height=500,
+        legend=dict(
+            x=0.02,
+            y=0.98,
+            bgcolor='rgba(255, 255, 255, 0.5)'
+        )
+    )
+
+    return fig
