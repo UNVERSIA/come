@@ -355,82 +355,25 @@ class CarbonCalculator:
                     'total_CO2eq': [1000] * 30  # 默认值
                 })
 
+        # 检查是否包含必要的列
+        required_cols = ['日期', '处理水量(m³)', '电耗(kWh)']
+        for col in required_cols:
+            if col not in df.columns:
+                if col == '处理水量(m³)':
+                    df[col] = 10000  # 默认处理水量
+                elif col == '电耗(kWh)':
+                    df[col] = 3000  # 默认电耗
+                else:
+                    df[col] = pd.date_range(start=datetime.now() - timedelta(days=30),
+                                            periods=30, freq='D')
+
         df_calc = self.calculate_direct_emissions(df)
         df_calc = self.calculate_indirect_emissions(df_calc)
         df_calc = self.calculate_unit_emissions(df_calc)
 
-        # 使用时间序列分析而不是简单平均
-        # 确保有足够的数据
-        if len(df_calc) < 7:  # 至少需要7天数据
-            print("警告: 数据不足，使用简单平均预测")
-            daily_avg = df_calc['total_CO2eq'].mean() if 'total_CO2eq' in df_calc.columns else 1000
-            predictions = [daily_avg] * future_days
-            std_dev = df_calc['total_CO2eq'].std() if 'total_CO2eq' in df_calc.columns else daily_avg * 0.1
-            lower_bounds = [max(0, p - std_dev) for p in predictions]
-            upper_bounds = [p + std_dev for p in predictions]
-
-            # 生成预测结果
-            last_date = df_calc['日期'].max() if '日期' in df_calc.columns else pd.Timestamp.now()
-            future_dates = [last_date + timedelta(days=i) for i in range(1, future_days + 1)]
-
-            return pd.DataFrame({
-                '日期': future_dates,
-                'predicted_CO2eq': predictions,
-                'lower_bound': lower_bounds,
-                'upper_bound': upper_bounds
-            })
-
-        ts_data = df_calc.set_index('日期')['total_CO2eq']
-
-        # 使用pandas的rolling和expanding方法代替statsmodels
-        try:
-            # 使用简单移动平均和指数平滑
-            # 计算趋势
-            trend = ts_data.rolling(window=7, min_periods=1).mean()
-
-            # 计算季节性（如果数据足够）
-            if len(ts_data) >= 14:
-                seasonal = ts_data - trend
-                seasonal_component = seasonal.rolling(window=7, min_periods=1).mean()
-            else:
-                seasonal_component = pd.Series(0, index=ts_data.index)
-
-            # 基础预测值
-            base_prediction = trend.iloc[-1] if len(trend) > 0 else ts_data.mean()
-
-            predictions = []
-            for i in range(1, future_days + 1):
-                # 简单的趋势外推
-                predicted = base_prediction + (trend.diff().mean() * i if len(trend) > 1 else 0)
-                # 添加季节性成分（如果可用）
-                if not seasonal_component.empty:
-                    predicted += seasonal_component.iloc[-1] if i % 7 == 0 else 0
-                predictions.append(max(0, predicted))
-
-            # 计算置信区间
-            std_dev = ts_data.std()
-            lower_bounds = [max(0, p - std_dev) for p in predictions]
-            upper_bounds = [p + std_dev for p in predictions]
-
-        except Exception as e:
-            print(f"简单预测出错: {e}")
-            # 完全回退到平均值方法
-            daily_avg = ts_data.mean()
-            predictions = [daily_avg] * future_days
-            std_dev = ts_data.std()
-            lower_bounds = [max(0, p - std_dev) for p in predictions]
-            upper_bounds = [p + std_dev for p in predictions]
-
-        # 生成预测结果
-        last_date = df_calc['日期'].max()
-        future_dates = [last_date + timedelta(days=i) for i in range(1, future_days + 1)]
-
-        return pd.DataFrame({
-            '日期': future_dates,
-            'predicted_CO2eq': predictions,
-            'lower_bound': lower_bounds,
-            'upper_bound': upper_bounds
-        })
+        # 确保有total_CO2eq列
+        if 'total_CO2eq' not in df_calc.columns:
+            df_calc['total_CO2eq'] = df_calc['电耗(kWh)'] * self.f_e
 
     def generate_process_adjustments(self, df):
         """生成工艺调整建议"""
