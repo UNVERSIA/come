@@ -1569,6 +1569,22 @@ with tab5:
                     models_dir = os.path.join(current_dir, "models")
                     model_path = os.path.join(models_dir, "carbon_lstm_model.keras")
 
+                    # 确保目录存在
+                    os.makedirs(models_dir, exist_ok=True)
+
+                    # 如果模型文件不存在，尝试创建默认模型
+                    if not os.path.exists(model_path):
+                        st.info("未找到预训练模型，正在创建默认模型...")
+                        try:
+                            from create_pretrained_model import create_pretrained_model
+
+                            create_pretrained_model()
+                            st.success("默认模型创建成功！")
+                        except Exception as e:
+                            st.error(f"创建默认模型失败: {str(e)}")
+                            st.warning("将使用简单预测方法")
+
+                    # 尝试加载模型
                     model_loaded = st.session_state.lstm_predictor.load_model(model_path)
                     if model_loaded:
                         st.success("✅ 预训练模型加载成功！")
@@ -1589,11 +1605,11 @@ with tab5:
 
                         # 检查模型是否加载成功
                         if st.session_state.lstm_predictor.model is not None:
-                            # 使用LSTM模型进行预测
+                            # 使用LSTM模型进行预测 - 直接预测12个月
                             prediction_df = st.session_state.lstm_predictor.predict(
                                 df_with_emissions,
                                 'total_CO2eq',
-                                steps=prediction_days  # 预测一年每天的数据
+                                steps=prediction_months  # 直接预测12个月
                             )
                         else:
                             # 使用简单预测方法
@@ -1602,26 +1618,36 @@ with tab5:
                             )
                             st.warning("使用简单预测方法生成数据")
 
-                        # 将日预测数据转换为月预测数据
-                        prediction_df['日期'] = pd.to_datetime(prediction_df['日期'])
-                        prediction_df.set_index('日期', inplace=True)
+                            # 将日预测数据转换为月预测数据
+                            prediction_df['日期'] = pd.to_datetime(prediction_df['日期'])
+                            prediction_df.set_index('日期', inplace=True)
 
-                        # 按月聚合 - 使用平均值
-                        monthly_prediction = prediction_df.resample('M').agg({
-                            'predicted_CO2eq': 'mean',
-                            'lower_bound': 'mean',
-                            'upper_bound': 'mean'
-                        })
+                            # 按月聚合 - 使用平均值
+                            prediction_df = prediction_df.resample('M').agg({
+                                'predicted_CO2eq': 'mean',
+                                'lower_bound': 'mean',
+                                'upper_bound': 'mean'
+                            }).reset_index()
+
+                        # 确保有日期列
+                        if '日期' not in prediction_df.columns:
+                            # 生成日期序列
+                            last_date = df_with_emissions['日期'].max()
+                            prediction_dates = pd.date_range(
+                                start=last_date + pd.Timedelta(days=1),
+                                periods=len(prediction_df),
+                                freq='M'
+                            )
+                            prediction_df['日期'] = prediction_dates
 
                         # 添加年月列用于显示
-                        monthly_prediction.reset_index(inplace=True)
-                        monthly_prediction['年月'] = monthly_prediction['日期'].dt.strftime('%Y年%m月')
+                        prediction_df['年月'] = prediction_df['日期'].dt.strftime('%Y年%m月')
 
                         # 只保留2025年的数据
-                        monthly_prediction = monthly_prediction[monthly_prediction['日期'].dt.year == 2025]
+                        prediction_df = prediction_df[prediction_df['日期'].dt.year == 2025]
 
                         # 存储结果
-                        st.session_state.prediction_data = monthly_prediction
+                        st.session_state.prediction_data = prediction_df
                         st.session_state.historical_data = df_with_emissions
                         st.session_state.prediction_made = True
 
