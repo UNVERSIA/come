@@ -20,13 +20,18 @@ def create_pretrained_model():
     data_with_emissions = calculator.calculate_indirect_emissions(data_with_emissions)
     data_with_emissions = calculator.calculate_unit_emissions(data_with_emissions)
 
+    # 获取当前文件所在目录的绝对路径
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    models_dir = os.path.join(current_dir, "models")
+    save_path = os.path.join(models_dir, "carbon_lstm_model.keras")
+
     # 训练模型 - 使用新的Keras格式
     predictor = CarbonLSTMPredictor()
     history = predictor.train(
         data_with_emissions,
         'total_CO2eq',
         epochs=50,
-        save_path='models/carbon_lstm_model.keras'  # 修改保存路径与app.py一致
+        save_path=save_path  # 使用绝对路径
     )
 
     print("预训练模型已创建并保存到 models/carbon_lstm_model.keras")
