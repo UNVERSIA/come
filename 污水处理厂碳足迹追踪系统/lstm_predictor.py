@@ -495,8 +495,10 @@ class CarbonLSTMPredictor:
             # 更新当前序列
             current_sequence = np.concatenate([current_sequence[:, 1:, :], new_row.reshape(1, 1, -1)], axis=1)
 
-        # 反标准化预测结果
+        # 在 predict 方法中的逆变换部分，添加确保非负的处理
         predictions = self.target_scaler.inverse_transform(np.array(predictions).reshape(-1, 1)).flatten()
+        # 确保预测值为非负
+        predictions = np.maximum(predictions, 0)  # 将所有负值设为0
 
         # 生成预测日期（从最后日期开始的下一个月）
         last_date = df['日期'].max()
