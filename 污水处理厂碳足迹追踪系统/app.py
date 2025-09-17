@@ -1528,11 +1528,6 @@ with tab5:
 
                         st.success("✅ 模型训练完成并已保存！")
 
-                        # 显示训练历史图表
-                        if training_history is not None:
-                            history_fig = vis.create_training_history_chart(training_history)
-                            st.plotly_chart(history_fig, use_container_width=True)
-
                     except Exception as e:
                         st.error(f"模型训练失败: {str(e)}")
                         st.error("详细错误信息: " + str(e))
