@@ -1560,16 +1560,20 @@ with tab5:
             if st.session_state.lstm_predictor is None:
                 st.session_state.lstm_predictor = CarbonLSTMPredictor()
 
-            # 确保模型已加载
+            # 尝试加载模型
+            model_loaded = False
             if st.session_state.lstm_predictor.model is None:
                 try:
                     # 尝试加载预训练模型
                     model_path = "models/carbon_lstm_model.h5"
-                    st.session_state.lstm_predictor.load_model(model_path)
-                    st.success("✅ 预训练模型加载成功！")
+                    model_loaded = st.session_state.lstm_predictor.load_model(model_path)
+                    if model_loaded:
+                        st.success("✅ 预训练模型加载成功！")
+                    else:
+                        st.warning("⚠️ 预训练模型加载失败，将使用简单预测方法")
                 except Exception as e:
                     st.error(f"模型加载失败: {str(e)}")
-                    st.info("将使用新训练的模型进行预测")
+                    st.info("将使用简单预测方法")
 
             with st.spinner(f"正在进行2025年全年预测..."):
                 try:
@@ -1580,12 +1584,20 @@ with tab5:
                         df_with_emissions = calculator.calculate_indirect_emissions(df_with_emissions)
                         df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
 
-                        # 进行预测 - 预测365天然后聚合为月度数据
-                        prediction_df = st.session_state.lstm_predictor.predict(
-                            df_with_emissions,
-                            'total_CO2eq',
-                            steps=365  # 预测一年每天的数据
-                        )
+                        # 检查模型是否加载成功
+                        if st.session_state.lstm_predictor.model is not None:
+                            # 使用LSTM模型进行预测
+                            prediction_df = st.session_state.lstm_predictor.predict(
+                                df_with_emissions,
+                                'total_CO2eq',
+                                steps=365  # 预测一年每天的数据
+                            )
+                        else:
+                            # 使用简单预测方法
+                            prediction_df = calculator._simple_emission_prediction(
+                                st.session_state.df, 365  # 预测一年
+                            )
+                            st.warning("使用简单预测方法生成数据")
 
                         # 将日预测数据转换为月预测数据
                         prediction_df['日期'] = pd.to_datetime(prediction_df['日期'])
@@ -1615,7 +1627,7 @@ with tab5:
                     st.error(f"预测失败: {str(e)}")
                     # 使用简单预测作为备选
                     try:
-                        # 修改简单预测也返回月度数据
+                        calculator = CarbonCalculator()
                         simple_prediction = calculator._simple_emission_prediction(
                             st.session_state.df, 365  # 预测一年
                         )
