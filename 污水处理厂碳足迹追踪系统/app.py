@@ -1509,76 +1509,88 @@ with tab5:
 
         # 将预测按钮移到这里
         if st.button("进行预测", key="predict_btn"):
-            if st.session_state.lstm_predictor is not None:
-                with st.spinner(f"正在进行2025年全年预测..."):
+            # 确保预测器已初始化
+            if st.session_state.lstm_predictor is None:
+                st.session_state.lstm_predictor = CarbonLSTMPredictor()
+
+            # 确保模型已加载
+            if st.session_state.lstm_predictor.model is None:
+                try:
+                    # 尝试加载预训练模型
+                    model_path = "models/carbon_lstm_model.h5"
+                    st.session_state.lstm_predictor.load_model(model_path)
+                    st.success("✅ 预训练模型加载成功！")
+                except Exception as e:
+                    st.error(f"模型加载失败: {str(e)}")
+                    st.info("将使用新训练的模型进行预测")
+
+            with st.spinner(f"正在进行2025年全年预测..."):
+                try:
+                    if st.session_state.df is not None:
+                        # 确保数据已计算碳排放
+                        calculator = CarbonCalculator()
+                        df_with_emissions = calculator.calculate_direct_emissions(st.session_state.df)
+                        df_with_emissions = calculator.calculate_indirect_emissions(df_with_emissions)
+                        df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
+
+                        # 进行预测 - 预测365天然后聚合为月度数据
+                        prediction_df = st.session_state.lstm_predictor.predict(
+                            df_with_emissions,
+                            'total_CO2eq',
+                            steps=365  # 预测一年每天的数据
+                        )
+
+                        # 将日预测数据转换为月预测数据
+                        prediction_df['日期'] = pd.to_datetime(prediction_df['日期'])
+                        prediction_df.set_index('日期', inplace=True)
+
+                        # 按月聚合 - 使用平均值
+                        monthly_prediction = prediction_df.resample('M').agg({
+                            'predicted_CO2eq': 'mean',
+                            'lower_bound': 'mean',
+                            'upper_bound': 'mean'
+                        })
+
+                        # 添加年月列用于显示
+                        monthly_prediction.reset_index(inplace=True)
+                        monthly_prediction['年月'] = monthly_prediction['日期'].dt.strftime('%Y年%m月')
+
+                        # 只保留2025年的数据
+                        monthly_prediction = monthly_prediction[monthly_prediction['日期'].dt.year == 2025]
+
+                        # 存储结果
+                        st.session_state.prediction_data = monthly_prediction
+                        st.session_state.historical_data = df_with_emissions
+                        st.session_state.prediction_made = True
+
+                        st.success("✅ 预测完成！")
+                except Exception as e:
+                    st.error(f"预测失败: {str(e)}")
+                    # 使用简单预测作为备选
                     try:
-                        if st.session_state.df is not None:
-                            # 确保数据已计算碳排放
-                            calculator = CarbonCalculator()
-                            df_with_emissions = calculator.calculate_direct_emissions(st.session_state.df)
-                            df_with_emissions = calculator.calculate_indirect_emissions(df_with_emissions)
-                            df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
+                        # 修改简单预测也返回月度数据
+                        simple_prediction = calculator._simple_emission_prediction(
+                            st.session_state.df, 365  # 预测一年
+                        )
 
-                            # 进行预测 - 预测365天然后聚合为月度数据
-                            prediction_df = st.session_state.lstm_predictor.predict(
-                                df_with_emissions,
-                                'total_CO2eq',
-                                steps=365  # 预测一年每天的数据
-                            )
+                        # 转换为月度数据
+                        simple_prediction['日期'] = pd.to_datetime(simple_prediction['日期'])
+                        simple_prediction.set_index('日期', inplace=True)
+                        monthly_simple = simple_prediction.resample('M').agg({
+                            'predicted_CO2eq': 'mean',
+                            'lower_bound': 'mean',
+                            'upper_bound': 'mean'
+                        })
+                        monthly_simple.reset_index(inplace=True)
+                        monthly_simple['年月'] = monthly_simple['日期'].dt.strftime('%Y年%m月')
+                        monthly_simple = monthly_simple[monthly_simple['日期'].dt.year == 2025]
 
-                            # 将日预测数据转换为月预测数据
-                            prediction_df['日期'] = pd.to_datetime(prediction_df['日期'])
-                            prediction_df.set_index('日期', inplace=True)
-
-                            # 按月聚合 - 使用平均值
-                            monthly_prediction = prediction_df.resample('M').agg({
-                                'predicted_CO2eq': 'mean',
-                                'lower_bound': 'mean',
-                                'upper_bound': 'mean'
-                            })
-
-                            # 添加年月列用于显示
-                            monthly_prediction.reset_index(inplace=True)
-                            monthly_prediction['年月'] = monthly_prediction['日期'].dt.strftime('%Y年%m月')
-
-                            # 只保留2025年的数据
-                            monthly_prediction = monthly_prediction[monthly_prediction['日期'].dt.year == 2025]
-
-                            # 存储结果
-                            st.session_state.prediction_data = monthly_prediction
-                            st.session_state.historical_data = df_with_emissions
-                            st.session_state.prediction_made = True
-
-                            st.success("✅ 预测完成！")
-                    except Exception as e:
-                        st.error(f"预测失败: {str(e)}")
-                        # 使用简单预测作为备选
-                        try:
-                            # 修改简单预测也返回月度数据
-                            simple_prediction = calculator._simple_emission_prediction(
-                                st.session_state.df, 365  # 预测一年
-                            )
-
-                            # 转换为月度数据
-                            simple_prediction['日期'] = pd.to_datetime(simple_prediction['日期'])
-                            simple_prediction.set_index('日期', inplace=True)
-                            monthly_simple = simple_prediction.resample('M').agg({
-                                'predicted_CO2eq': 'mean',
-                                'lower_bound': 'mean',
-                                'upper_bound': 'mean'
-                            })
-                            monthly_simple.reset_index(inplace=True)
-                            monthly_simple['年月'] = monthly_simple['日期'].dt.strftime('%Y年%m月')
-                            monthly_simple = monthly_simple[monthly_simple['日期'].dt.year == 2025]
-
-                            st.session_state.prediction_data = monthly_simple
-                            st.session_state.historical_data = df_with_emissions
-                            st.session_state.prediction_made = True
-                            st.warning("使用简单预测方法生成数据")
-                        except Exception as fallback_error:
-                            st.error(f"简单预测也失败: {str(fallback_error)}")
-            else:
-                st.warning("请先加载或训练模型")
+                        st.session_state.prediction_data = monthly_simple
+                        st.session_state.historical_data = df_with_emissions
+                        st.session_state.prediction_made = True
+                        st.warning("使用简单预测方法生成数据")
+                    except Exception as fallback_error:
+                        st.error(f"简单预测也失败: {str(fallback_error)}")
 
     with predict_col2:
         st.info("预测2025年全年每月碳排放数据。使用LSTM模型基于2018-2024年历史数据进行预测。")
@@ -1586,6 +1598,21 @@ with tab5:
     # 第四部分：预测结果显示
     if st.session_state.get('prediction_made', False):
         st.subheader("预测结果")
+
+        # 添加年份选择器
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            available_years = sorted(st.session_state.historical_data['日期'].dt.year.unique())
+            selected_year = st.selectbox("选择年份查看历史趋势", available_years,
+                                         index=len(available_years) - 1 if available_years else 0)
+
+        # 显示历史年度趋势图
+        yearly_trend_fig = vis.create_historical_trend_chart(st.session_state.historical_data)
+        st.plotly_chart(yearly_trend_fig, use_container_width=True)
+
+        # 显示指定年份的月度趋势
+        monthly_trend_fig = vis.create_monthly_trend_chart(st.session_state.historical_data, selected_year)
+        st.plotly_chart(monthly_trend_fig, use_container_width=True)
 
         # 显示预测图表
         forecast_fig = vis.create_forecast_chart(
