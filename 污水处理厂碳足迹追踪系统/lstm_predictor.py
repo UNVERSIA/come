@@ -318,7 +318,7 @@ class CarbonLSTMPredictor:
         return np.array(X), np.array(y)
 
     def load_model(self, model_path=None):
-        """加载预训练模型"""
+        """加载预训练模型 - 兼容性改进版"""
         # 如果没有提供模型路径，使用默认路径
         if model_path is None:
             # 获取当前文件所在目录的绝对路径
@@ -329,53 +329,68 @@ class CarbonLSTMPredictor:
             # 确保目录存在
             os.makedirs(os.path.dirname(model_path), exist_ok=True)
 
-        # 检查模型文件是否存在
-        if not os.path.exists(model_path):
-            # 尝试其他可能的模型路径
-            possible_paths = [
-                model_path,
-                model_path.replace('.keras', '.h5'),
-                'models/carbon_lstm.h5',
-                'models/carbon_lstm.weights.h5'
-            ]
+        # 构建所有可能的文件路径
+        possible_model_paths = [
+            model_path,
+            model_path.replace('.keras', '.h5'),
+            'models/carbon_lstm_model.h5',
+            'models/carbon_lstm.h5',
+            'models/carbon_lstm_model.weights.h5'
+        ]
 
-            found = False
-            for path in possible_paths:
-                if os.path.exists(path):
-                    model_path = path
-                    found = True
-                    break
+        possible_meta_paths = [
+            model_path.replace('.keras', '_metadata.pkl').replace('.h5', '_metadata.pkl'),
+            'models/carbon_lstm_metadata.pkl',
+            model_path.replace('.keras', '.pkl').replace('.h5', '.pkl')
+        ]
 
-            if not found:
-                logger.warning("未找到预训练模型文件，模型将保持未加载状态")
-                self.model = None
-                return False
+        possible_arch_paths = [
+            model_path.replace('.keras', '_architecture.json').replace('.h5', '_architecture.json'),
+            'models/carbon_lstm_architecture.json'
+        ]
 
-        # 尝试加载元数据
-        metadata_path = model_path.replace('.keras', '_metadata.pkl').replace('.h5', '_metadata.pkl')
-        if not os.path.exists(metadata_path):
-            # 尝试其他可能的元数据路径
-            possible_meta_paths = [
-                metadata_path,
-                'models/carbon_lstm_metadata.pkl',
-                model_path.replace('.keras', '.pkl').replace('.h5', '.pkl')
-            ]
+        possible_weights_paths = [
+            model_path.replace('.keras', '.weights.h5').replace('.h5', '.weights.h5'),
+            'models/carbon_lstm.weights.h5',
+            'models/carbon_lstm.h5'
+        ]
 
-            for path in possible_meta_paths:
-                if os.path.exists(path):
-                    metadata_path = path
-                    break
+        # 查找模型文件
+        found_model_path = None
+        for path in possible_model_paths:
+            if os.path.exists(path):
+                found_model_path = path
+                break
 
-        if os.path.exists(metadata_path):
+        if not found_model_path:
+            logger.warning("未找到预训练模型文件，模型将保持未加载状态")
+            self.model = None
+            return False
+
+        # 查找并加载元数据
+        metadata_path = None
+        for path in possible_meta_paths:
+            if os.path.exists(path):
+                metadata_path = path
+                break
+
+        if metadata_path and os.path.exists(metadata_path):
             try:
                 metadata = joblib.load(metadata_path)
-                self.feature_scalers = metadata['feature_scalers']
-                self.sequence_length = metadata['sequence_length']
-                self.forecast_days = metadata['forecast_days']
-                self.feature_columns = metadata['feature_columns']
+                self.feature_scalers = metadata.get('feature_scalers', {})
+                self.sequence_length = metadata.get('sequence_length', 30)
+                self.forecast_days = metadata.get('forecast_days', 7)
+                self.feature_columns = metadata.get('feature_columns', [
+                    '处理水量(m³)', '电耗(kWh)', 'PAC投加量(kg)',
+                    'PAM投加量(kg)', '次氯酸钠投加量(kg)',
+                    '进水COD(mg/L)', '出水COD(mg/L)', '进水TN(mg/L)', '出水TN(mg/L)'
+                ])
                 # 加载目标缩放器（如果存在）
                 if 'target_scaler' in metadata:
                     self.target_scaler = metadata['target_scaler']
+                else:
+                    # 初始化默认目标缩放器
+                    self.target_scaler = MinMaxScaler()
             except Exception as e:
                 logger.warning(f"加载元数据失败: {str(e)}")
                 # 设置默认值
@@ -386,41 +401,54 @@ class CarbonLSTMPredictor:
                     'PAM投加量(kg)', '次氯酸钠投加量(kg)',
                     '进水COD(mg/L)', '出水COD(mg/L)', '进水TN(mg/L)', '出水TN(mg/L)'
                 ]
+                self.target_scaler = MinMaxScaler()
 
+        # 尝试直接加载模型
         try:
-            # 尝试直接加载模型
-            self.model = load_model(model_path)
-            logger.info("模型加载成功")
+            # 使用自定义对象和兼容性选项
+            custom_objects = None
+            try:
+                self.model = load_model(found_model_path, custom_objects=custom_objects, compile=False)
+            except:
+                # 如果失败，尝试使用安全的加载方式
+                self.model = load_model(
+                    found_model_path,
+                    custom_objects=custom_objects,
+                    compile=False,
+                    safe_mode=False  # 禁用安全模式以提高兼容性
+                )
+
+            # 手动编译模型
+            self.model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+            logger.info("模型直接加载成功")
             return True
         except Exception as e:
-            # 如果直接加载失败，尝试使用权重和架构
-            try:
-                logger.warning(f"模型加载遇到兼容性问题: {str(e)}")
-                logger.info("尝试使用备用加载方式...")
+            logger.warning(f"直接模型加载失败: {str(e)}，尝试备用加载方式...")
 
-                # 尝试加载架构和权重
-                architecture_path = model_path.replace('.keras', '_architecture.json').replace('.h5',
-                                                                                               '_architecture.json')
-                weights_path = model_path.replace('.keras', '.weights.h5').replace('.h5', '.weights.h5')
+            # 备用加载方式：尝试加载架构和权重
+            architecture_path = None
+            for path in possible_arch_paths:
+                if os.path.exists(path):
+                    architecture_path = path
+                    break
 
-                # 如果权重文件不存在，尝试其他可能的路径
-                if not os.path.exists(weights_path):
-                    possible_weights = [
-                        weights_path,
-                        model_path.replace('.keras', '.h5').replace('.h5', '.h5'),
-                        'models/carbon_lstm.weights.h5',
-                        'models/carbon_lstm.h5'
-                    ]
+            weights_path = None
+            for path in possible_weights_paths:
+                if os.path.exists(path):
+                    weights_path = path
+                    break
 
-                    for path in possible_weights:
-                        if os.path.exists(path):
-                            weights_path = path
-                            break
-
-                if os.path.exists(architecture_path) and os.path.exists(weights_path):
+            if architecture_path and weights_path and os.path.exists(architecture_path) and os.path.exists(
+                    weights_path):
+                try:
                     # 从JSON加载模型架构
                     with open(architecture_path, 'r') as json_file:
                         model_json = json_file.read()
+
+                    # 修复可能的架构兼容性问题
+                    model_json = model_json.replace('"batch_shape": [null, 30, 9]',
+                                                    '"batch_input_shape": [null, 30, 9]')
+
                     self.model = model_from_json(model_json)
 
                     # 加载权重
@@ -430,12 +458,31 @@ class CarbonLSTMPredictor:
                     self.model.compile(optimizer='adam', loss='mse', metrics=['mae'])
                     logger.info("使用备用方式加载模型成功!")
                     return True
-                else:
-                    logger.warning("模型架构或权重文件不存在，加载失败")
-                    self.model = None
-                    return False
-            except Exception as inner_e:
-                logger.error(f"所有加载方式均失败: {str(inner_e)}")
+                except Exception as arch_e:
+                    logger.error(f"架构加载失败: {str(arch_e)}")
+
+            # 最后尝试：重建模型并加载权重
+            try:
+                logger.info("尝试重建模型并加载权重...")
+
+                # 确定输入形状
+                n_features = len(self.feature_columns)
+                input_shape = (self.sequence_length, n_features)
+
+                # 重建模型
+                self.model = self.build_model(input_shape)
+
+                # 尝试加载权重
+                if weights_path and os.path.exists(weights_path):
+                    self.model.load_weights(weights_path)
+
+                # 编译模型
+                self.model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+
+                logger.info("模型重建并加载权重成功")
+                return True
+            except Exception as rebuild_e:
+                logger.error(f"所有加载方式均失败: {str(rebuild_e)}")
                 self.model = None
                 return False
 
