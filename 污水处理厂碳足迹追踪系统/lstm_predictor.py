@@ -583,9 +583,22 @@ class CarbonLSTMPredictor:
             # 更新当前序列
             current_sequence = np.expand_dims(new_sequence, axis=0)
 
-        # 生成预测日期（从最后日期开始的下一天）
+        # 生成预测日期（按月生成）
         last_date = df['日期'].max()
-        prediction_dates = [last_date + timedelta(days=i + 1) for i in range(steps)]
+
+        # 如果steps是12，表示预测12个月，则按月生成日期
+        if steps == 12:
+            # 生成每月最后一天的日期
+            prediction_dates = []
+            for i in range(1, steps + 1):
+                # 计算下个月的日期
+                next_month = last_date + pd.DateOffset(months=i)
+                # 获取该月的最后一天
+                month_end = pd.Timestamp(year=next_month.year, month=next_month.month, day=1) + pd.offsets.MonthEnd(1)
+                prediction_dates.append(month_end)
+        else:
+            # 如果不是12个月，按天生成日期
+            prediction_dates = [last_date + timedelta(days=i + 1) for i in range(steps)]
 
         # 创建结果DataFrame
         result_df = pd.DataFrame({
