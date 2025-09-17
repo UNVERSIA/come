@@ -844,3 +844,76 @@ def create_monthly_forecast_chart(monthly_prediction):
         )
 
     return fig
+
+
+def create_historical_trend_chart(historical_data):
+    """创建历史年度碳排放趋势图"""
+    if historical_data is None or historical_data.empty:
+        return go.Figure()
+
+    # 确保有必要的列
+    if '日期' not in historical_data.columns or 'total_CO2eq' not in historical_data.columns:
+        return go.Figure()
+
+    df = historical_data.copy()
+
+    # 确保日期列是datetime类型
+    if not pd.api.types.is_datetime64_any_dtype(df['日期']):
+        df['日期'] = pd.to_datetime(df['日期'])
+
+    df['年份'] = df['日期'].dt.year
+
+    # 按年聚合
+    yearly_trend = df.groupby('年份')['total_CO2eq'].sum().reset_index()
+
+    fig = px.line(yearly_trend, x='年份', y='total_CO2eq',
+                  title='历史年度碳排放趋势',
+                  markers=True)
+    fig.update_traces(line=dict(width=3), marker=dict(size=8))
+    fig.update_layout(
+        xaxis_title="年份",
+        yaxis_title="年度总碳排放 (kgCO2eq)",
+        font=dict(size=14, color="black"),
+        plot_bgcolor="rgba(245, 245, 245, 1)",
+        paper_bgcolor="rgba(245, 245, 245, 1)",
+        height=400,
+        xaxis=dict(tickmode='linear', dtick=1)  # 每年一个刻度
+    )
+    return fig
+
+
+def create_monthly_trend_chart(historical_data, selected_year=None):
+    """创建指定年份的月度碳排放趋势图"""
+    if historical_data is None or historical_data.empty:
+        return go.Figure()
+
+    df = historical_data.copy()
+
+    # 确保日期列是datetime类型
+    if not pd.api.types.is_datetime64_any_dtype(df['日期']):
+        df['日期'] = pd.to_datetime(df['日期'])
+
+    df['年份'] = df['日期'].dt.year
+    df['月份'] = df['日期'].dt.month
+
+    if selected_year is None:
+        selected_year = df['年份'].max()  # 默认显示最近一年
+
+    df_year = df[df['年份'] == selected_year]
+
+    # 按月聚合
+    monthly_trend = df_year.groupby('月份')['total_CO2eq'].sum().reset_index()
+
+    fig = px.bar(monthly_trend, x='月份', y='total_CO2eq',
+                 title=f'{selected_year}年月度碳排放',
+                 text_auto='.2s')
+    fig.update_layout(
+        xaxis_title="月份",
+        yaxis_title="月度总碳排放 (kgCO2eq)",
+        font=dict(size=14, color="black"),
+        plot_bgcolor="rgba(245, 245, 245, 1)",
+        paper_bgcolor="rgba(245, 245, 245, 1)",
+        height=400,
+        xaxis=dict(tickmode='linear', dtick=1, range=[0.5, 12.5])  # 1到12月
+    )
+    return fig
