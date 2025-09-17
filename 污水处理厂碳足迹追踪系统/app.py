@@ -1434,30 +1434,29 @@ with tab5:
     st.subheader("1. 模型管理")
     load_col1, load_col2 = st.columns([1, 3])
     with load_col1:
+        # 初始化预测器
+        if st.session_state.lstm_predictor is None:
+            st.session_state.lstm_predictor = CarbonLSTMPredictor()
+
+        # 尝试加载预训练模型
+        if st.session_state.lstm_predictor.model is None:
+            try:
+                model_path = "models/carbon_lstm_model.h5"
+                if os.path.exists(model_path):
+                    st.session_state.lstm_predictor.load_model(model_path)
+                    st.success("✅ 预训练模型加载成功！")
+                else:
+                    st.warning("⚠️ 预训练模型文件不存在")
+            except Exception as e:
+                st.error(f"模型加载失败: {str(e)}")
+        else:
+            st.success("✅ 模型已加载，可以进行预测")
+
         # 在tab5中的预测按钮逻辑
         if st.button("进行预测", key="predict_btn"):
-            # 确保预测器已初始化
-            if st.session_state.lstm_predictor is None:
-                st.session_state.lstm_predictor = CarbonLSTMPredictor()
-
-            # 尝试加载模型
-            model_loaded = False
-            if st.session_state.lstm_predictor.model is None:
-                try:
-                    # 尝试加载预训练模型
-                    model_path = "models/carbon_lstm_model.h5"
-                    model_loaded = st.session_state.lstm_predictor.load_model(model_path)
-                    if model_loaded:
-                        st.success("✅ 预训练模型加载成功！")
-                    else:
-                        st.warning("⚠️ 预训练模型加载失败，将使用简单预测方法")
-                except Exception as e:
-                    st.error(f"模型加载失败: {str(e)}")
-                    st.info("将使用简单预测方法")
-
-            with st.spinner(f"正在进行2025年全年预测..."):
-                try:
-                    if st.session_state.df is not None:
+            if st.session_state.df is not None:
+                with st.spinner(f"正在进行2025年全年预测..."):
+                    try:
                         # 确保数据已计算碳排放
                         calculator = CarbonCalculator()
                         df_with_emissions = calculator.calculate_direct_emissions(st.session_state.df)
@@ -1510,35 +1509,58 @@ with tab5:
                         st.session_state.prediction_made = True
 
                         st.success("✅ 预测完成！")
-                except Exception as e:
-                    st.error(f"预测失败: {str(e)}")
-                    # 使用简单预测作为备选
-                    try:
-                        calculator = CarbonCalculator()
-                        simple_prediction = calculator._simple_emission_prediction(
-                            st.session_state.df, 365  # 预测一年
-                        )
+                    except Exception as e:
+                        st.error(f"预测失败: {str(e)}")
+                        # 使用简单预测作为备选
+                        try:
+                            calculator = CarbonCalculator()
+                            simple_prediction = calculator._simple_emission_prediction(
+                                st.session_state.df, 365  # 预测一年
+                            )
 
-                        # 转换为月度数据
-                        simple_prediction['日期'] = pd.to_datetime(simple_prediction['日期'])
-                        simple_prediction.set_index('日期', inplace=True)
-                        monthly_simple = simple_prediction.resample('M').agg({
-                            'predicted_CO2eq': 'mean',
-                            'lower_bound': 'mean',
-                            'upper_bound': 'mean'
-                        })
-                        monthly_simple.reset_index(inplace=True)
-                        monthly_simple['年月'] = monthly_simple['日期'].dt.strftime('%Y年%m月')
-                        monthly_simple = monthly_simple[monthly_simple['日期'].dt.year == 2025]
+                            # 转换为月度数据
+                            simple_prediction['日期'] = pd.to_datetime(simple_prediction['日期'])
+                            simple_prediction.set_index('日期', inplace=True)
+                            monthly_simple = simple_prediction.resample('M').agg({
+                                'predicted_CO2eq': 'mean',
+                                'lower_bound': 'mean',
+                                'upper_bound': 'mean'
+                            })
+                            monthly_simple.reset_index(inplace=True)
+                            monthly_simple['年月'] = monthly_simple['日期'].dt.strftime('%Y年%m月')
+                            monthly_simple = monthly_simple[monthly_simple['日期'].dt.year == 2025]
 
-                        st.session_state.prediction_data = monthly_simple
-                        st.session_state.historical_data = df_with_emissions
-                        st.session_state.prediction_made = True
-                        st.warning("使用简单预测方法生成数据")
-                    except Exception as fallback_error:
-                        st.error(f"简单预测也失败: {str(fallback_error)}")
+                            st.session_state.prediction_data = monthly_simple
+                            st.session_state.historical_data = df_with_emissions
+                            st.session_state.prediction_made = True
+                            st.warning("使用简单预测方法生成数据")
+                        except Exception as fallback_error:
+                            st.error(f"简单预测也失败: {str(fallback_error)}")
+            else:
+                st.warning("请先上传数据")
+
     with load_col2:
-        st.info("预测2025年全年每月碳排放数据。使用LSTM模型基于2018-2024年历史数据进行预测。")
+        st.info("预测2025年全年每月碳排放数据。使用LSTM模型基于历史数据进行预测。")
+
+    # 显示模型状态
+    st.subheader("模型状态")
+    if st.session_state.lstm_predictor is not None and st.session_state.lstm_predictor.model is not None:
+        st.success("✅ 模型已加载，可以进行预测")
+        # 显示模型基本信息
+        model = st.session_state.lstm_predictor.model
+        if hasattr(model, 'summary'):
+            import io
+            import contextlib
+
+            string_buffer = io.StringIO()
+            with contextlib.redirect_stdout(string_buffer):
+                model.summary()
+            model_summary = string_buffer.getvalue()
+
+            with st.expander("查看模型架构"):
+                st.text(model_summary)
+    else:
+        st.warning("⚠️ 模型未加载，将使用简单预测方法")
 
     # 第四部分：预测结果显示
     if st.session_state.get('prediction_made', False):
@@ -1730,33 +1752,11 @@ with tab5:
 
             # 添加投资优先级建议
             st.info("💡 投资优先级建议：根据投资回收期和减排潜力综合评估，建议优先考虑投资回收期短、减排潜力大的技术")
-
-    # 显示模型状态
-    st.subheader("模型状态")
-    if st.session_state.lstm_predictor is not None and st.session_state.lstm_predictor.model is not None:
-        st.success("✅ 模型已加载，可以进行预测")
-    elif st.session_state.lstm_predictor is not None and st.session_state.lstm_predictor.model is None:
-        st.warning("⚠️ 模型未加载，请先加载或训练模型")
     else:
-        st.warning("⚠️ 请先加载或训练模型")
-
-    # 显示模型基本信息
-    if st.session_state.lstm_predictor is not None and st.session_state.lstm_predictor.model is not None:
-        model = st.session_state.lstm_predictor.model
-        if hasattr(model, 'summary'):
-            import io
-            import contextlib
-
-            string_buffer = io.StringIO()
-            with contextlib.redirect_stdout(string_buffer):
-                model.summary()
-            model_summary = string_buffer.getvalue()
-
-            with st.expander("查看模型架构"):
-                st.text(model_summary)
+        st.info("请先进行预测以查看结果")
 
     # 添加简单预测方法作为备选
-    if st.session_state.df is not None and st.session_state.lstm_predictor is None:
+    if st.session_state.df is not None:
         st.info("也可以使用简单预测方法（基于历史平均值）")
         if st.button("使用简单预测", key="simple_predict_btn"):
             with st.spinner("正在进行简单预测..."):
