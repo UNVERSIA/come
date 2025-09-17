@@ -355,25 +355,35 @@ class CarbonCalculator:
                     'total_CO2eq': [1000] * 30  # 默认值
                 })
 
-        # 检查是否包含必要的列
-        required_cols = ['日期', '处理水量(m³)', '电耗(kWh)']
-        for col in required_cols:
-            if col not in df.columns:
-                if col == '处理水量(m³)':
-                    df[col] = 10000  # 默认处理水量
-                elif col == '电耗(kWh)':
-                    df[col] = 3000  # 默认电耗
-                else:
-                    df[col] = pd.date_range(start=datetime.now() - timedelta(days=30),
-                                            periods=30, freq='D')
+        # 确保有日期列和碳排放列
+        if '日期' not in df.columns:
+            df['日期'] = pd.date_range(end=datetime.now(), periods=len(df), freq='D')
 
-        df_calc = self.calculate_direct_emissions(df)
-        df_calc = self.calculate_indirect_emissions(df_calc)
-        df_calc = self.calculate_unit_emissions(df_calc)
+        if 'total_CO2eq' not in df.columns:
+            # 计算碳排放
+            df = self.calculate_direct_emissions(df)
+            df = self.calculate_indirect_emissions(df)
+            df = self.calculate_unit_emissions(df)
 
-        # 确保有total_CO2eq列
-        if 'total_CO2eq' not in df_calc.columns:
-            df_calc['total_CO2eq'] = df_calc['电耗(kWh)'] * self.f_e
+        # 计算历史平均值和趋势
+        historical_mean = df['total_CO2eq'].mean()
+        historical_std = df['total_CO2eq'].std()
+
+        # 生成预测
+        predictions = []
+        last_date = df['日期'].max()
+
+        for i in range(1, future_days + 1):
+            # 添加一些随机变化
+            prediction = max(0, historical_mean + np.random.normal(0, historical_std * 0.2))
+            predictions.append({
+                '日期': last_date + timedelta(days=i),
+                'predicted_CO2eq': prediction,
+                'lower_bound': max(0, prediction - historical_std * 0.3),
+                'upper_bound': prediction + historical_std * 0.3
+            })
+
+        return pd.DataFrame(predictions)
 
     def generate_process_adjustments(self, df):
         """生成工艺调整建议"""
