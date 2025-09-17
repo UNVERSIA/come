@@ -1427,27 +1427,35 @@ with tab4:
     else:  # 这里应该是与第1291行的if语句对齐
         st.warning("请先上传运行数据")
 
-with tab5:
-    st.header("碳排放趋势预测")
+    with tab5:
+        st.header("碳排放趋势预测")
 
-    # 第一部分：加载预训练模型
-    st.subheader("1. 模型管理")
-    load_col1, load_col2 = st.columns([1, 3])
-    with load_col1:
-        if st.button("加载预训练模型", key="load_model_btn"):
-            try:
-                # 初始化LSTM预测器
-                if st.session_state.lstm_predictor is None:
-                    st.session_state.lstm_predictor = CarbonLSTMPredictor()
+        # 第一部分：加载预训练模型
+        st.subheader("1. 模型管理")
+        load_col1, load_col2 = st.columns([1, 3])
+        with load_col1:
+            if st.button("加载预训练模型", key="load_model_btn"):
+                try:
+                    # 初始化LSTM预测器
+                    if st.session_state.lstm_predictor is None:
+                        st.session_state.lstm_predictor = CarbonLSTMPredictor()
+
                     # 尝试加载预训练模型
-                    model_path = "models/carbon_lstm_model.h5"
+                    model_path = "models/carbon_lstm_model.keras"
                     if os.path.exists(model_path):
                         st.session_state.lstm_predictor.load_model(model_path)
                         st.success("✅ 预训练模型加载成功！")
                     else:
-                        st.warning("⚠️ 未找到预训练模型，已创建新模型")
-            except Exception as e:
-                st.error(f"加载模型失败: {str(e)}")
+                        # 如果主模型文件不存在，尝试加载权重和架构
+                        weights_path = "models/carbon_lstm_model.weights.h5"
+                        architecture_path = "models/carbon_lstm_model_architecture.json"
+                        if os.path.exists(weights_path) and os.path.exists(architecture_path):
+                            st.session_state.lstm_predictor.load_model(model_path)  # 仍然传递主路径
+                            st.success("✅ 使用权重和架构加载模型成功！")
+                        else:
+                            st.warning("⚠️ 未找到预训练模型，请先训练模型")
+                except Exception as e:
+                    st.error(f"加载模型失败: {str(e)}")
     with load_col2:
         st.info("加载已训练好的LSTM模型进行预测。如果模型不存在，将创建一个新的未训练模型。")
 
@@ -1469,17 +1477,14 @@ with tab5:
                         if st.session_state.lstm_predictor is None:
                             st.session_state.lstm_predictor = CarbonLSTMPredictor()
 
-                        # 训练模型
+                        # 训练模型 - 使用新的保存路径
                         training_history = st.session_state.lstm_predictor.train(
                             df_with_emissions,
                             'total_CO2eq',
                             epochs=50,
-                            validation_split=0.2
+                            validation_split=0.2,
+                            save_path='models/carbon_lstm_model.keras'  # 修改保存路径
                         )
-
-                        # 保存模型
-                        os.makedirs("models", exist_ok=True)
-                        st.session_state.lstm_predictor.save_model("models/carbon_lstm_model.h5")
 
                         st.success("✅ 模型训练完成并已保存！")
 
@@ -1490,6 +1495,7 @@ with tab5:
 
                     except Exception as e:
                         st.error(f"模型训练失败: {str(e)}")
+                        st.error("详细错误信息: " + str(e))
             else:
                 st.warning("请先上传足够的数据（至少30天记录）")
     with train_col2:
@@ -1517,7 +1523,7 @@ with tab5:
             if st.session_state.lstm_predictor.model is None:
                 try:
                     # 尝试加载预训练模型
-                    model_path = "models/carbon_lstm_model.h5"
+                    model_path = "models/carbon_lstm_model.keras"
                     st.session_state.lstm_predictor.load_model(model_path)
                     st.success("✅ 预训练模型加载成功！")
                 except Exception as e:
@@ -1533,30 +1539,22 @@ with tab5:
                         df_with_emissions = calculator.calculate_indirect_emissions(df_with_emissions)
                         df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
 
-                        # 进行预测 - 预测365天然后聚合为月度数据
-                        prediction_df = st.session_state.lstm_predictor.predict(
+                        # 进行预测 - 直接预测月度数据
+                        monthly_prediction = st.session_state.lstm_predictor.predict(
                             df_with_emissions,
                             'total_CO2eq',
-                            steps=365  # 预测一年每天的数据
+                            steps=12  # 直接预测12个月
                         )
 
-                        # 将日预测数据转换为月预测数据
-                        prediction_df['日期'] = pd.to_datetime(prediction_df['日期'])
-                        prediction_df.set_index('日期', inplace=True)
-
-                        # 按月聚合 - 使用平均值
-                        monthly_prediction = prediction_df.resample('M').agg({
-                            'predicted_CO2eq': 'mean',
-                            'lower_bound': 'mean',
-                            'upper_bound': 'mean'
-                        })
+                        # 确保预测结果包含日期列
+                        if '日期' not in monthly_prediction.columns:
+                            # 生成2025年的月度日期
+                            start_date = pd.Timestamp('2025-01-01')
+                            monthly_dates = [start_date + pd.DateOffset(months=i) for i in range(12)]
+                            monthly_prediction['日期'] = monthly_dates
 
                         # 添加年月列用于显示
-                        monthly_prediction.reset_index(inplace=True)
                         monthly_prediction['年月'] = monthly_prediction['日期'].dt.strftime('%Y年%m月')
-
-                        # 只保留2025年的数据
-                        monthly_prediction = monthly_prediction[monthly_prediction['日期'].dt.year == 2025]
 
                         # 存储结果
                         st.session_state.prediction_data = monthly_prediction
@@ -1565,10 +1563,10 @@ with tab5:
 
                         st.success("✅ 预测完成！")
                 except Exception as e:
-                    st.error(f"预测失败: {str(e)}")
+                    st.error(f"LSTM预测失败: {str(e)}")
                     # 使用简单预测作为备选
                     try:
-                        # 修改简单预测也返回月度数据
+                        st.info("尝试使用简单预测方法...")
                         simple_prediction = calculator._simple_emission_prediction(
                             st.session_state.df, 365  # 预测一年
                         )
@@ -1582,8 +1580,10 @@ with tab5:
                             'upper_bound': 'mean'
                         })
                         monthly_simple.reset_index(inplace=True)
-                        monthly_simple['年月'] = monthly_simple['日期'].dt.strftime('%Y年%m月')
+
+                        # 只保留2025年的数据
                         monthly_simple = monthly_simple[monthly_simple['日期'].dt.year == 2025]
+                        monthly_simple['年月'] = monthly_simple['日期'].dt.strftime('%Y年%m月')
 
                         st.session_state.prediction_data = monthly_simple
                         st.session_state.historical_data = df_with_emissions
