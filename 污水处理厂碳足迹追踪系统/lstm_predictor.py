@@ -474,38 +474,72 @@ class CarbonLSTMPredictor:
         predictions = []
         current_sequence = X[-1:]  # 使用最后一段序列
 
+        # 获取最后已知的目标值，用于初始化
+        last_known_value = df[target_column].iloc[-1]
+
         for i in range(steps):
             # 预测下一步
             pred = self.model.predict(current_sequence, verbose=0)[0][0]
-            pred = max(0, pred)  # 确保非负
+
+            # 确保预测值合理（不低于0且不异常高）
+            pred = max(0, pred)
+            pred = min(pred, last_known_value * 3)  # 不超过最后值的3倍
+
             predictions.append(pred)
 
-            # 更新序列（使用预测值更新目标变量，其他特征使用趋势外推）
-            new_row = current_sequence[0][-1:].copy()
+            # 更新序列 - 使用更合理的方法
+            new_row = np.zeros((1, 1, len(self.feature_columns)))
 
-            # 这里简化处理，实际应用中应该使用更复杂的时间序列外推方法
-            # 对于月度预测，我们可以考虑季节性因素和趋势
+            # 对每个特征进行外推
             for j, col in enumerate(self.feature_columns):
                 if col == target_column:
-                    new_row[0][j] = pred  # 使用预测值更新目标变量
+                    # 目标列使用预测值
+                    new_row[0, 0, j] = pred
                 else:
-                    # 对其他特征使用简单的趋势外推
-                    # 这里使用最近3个月的平均变化率
-                    if len(X) >= 3:
-                        trend = np.mean([X[-1][-1][j] - X[-2][-1][j],
-                                         X[-2][-1][j] - X[-3][-1][j]])
-                        new_row[0][j] = current_sequence[0][-1][j] + trend
+                    # 其他特征使用趋势外推（基于最近7个时间点）
+                    if len(X) >= 7:
+                        recent_values = [X[-k][-1, j] for k in range(1, 8)]
+                        # 计算加权平均变化率（最近的值权重更高）
+                        weights = [0.1, 0.15, 0.2, 0.25, 0.15, 0.1, 0.05]
+                        changes = []
+                        for k in range(1, len(recent_values)):
+                            change = recent_values[k] - recent_values[k - 1]
+                            changes.append(change * weights[k - 1])
+
+                        avg_change = sum(changes) / sum(weights[:len(changes)])
+                        new_row[0, 0, j] = current_sequence[0, -1, j] + avg_change
                     else:
                         # 数据不足时使用最后值
-                        new_row[0][j] = current_sequence[0][-1][j]
+                        new_row[0, 0, j] = current_sequence[0, -1, j]
 
             # 更新当前序列
-            current_sequence = np.concatenate([current_sequence[:, 1:, :], new_row.reshape(1, 1, -1)], axis=1)
+            current_sequence = np.concatenate([current_sequence[:, 1:, :], new_row], axis=1)
 
-        # 在 predict 方法中的逆变换部分，添加确保非负的处理
-        predictions = self.target_scaler.inverse_transform(np.array(predictions).reshape(-1, 1)).flatten()
-        # 确保预测值为非负
-        predictions = np.maximum(predictions, 0)  # 将所有负值设为0
+        # 逆变换 - 添加异常值处理
+        try:
+            predictions = self.target_scaler.inverse_transform(np.array(predictions).reshape(-1, 1)).flatten()
+
+            # 确保预测值合理（基于历史数据范围）
+            historical_min = df[target_column].min()
+            historical_max = df[target_column].max()
+            historical_avg = df[target_column].mean()
+
+            for i in range(len(predictions)):
+                if predictions[i] < historical_min * 0.5:
+                    predictions[i] = historical_min * 0.8
+                elif predictions[i] > historical_max * 2:
+                    predictions[i] = historical_max * 1.2
+
+        except Exception as e:
+            print(f"逆变换失败: {e}")
+            # 使用简单线性外推作为备选
+            last_values = df[target_column].tail(7).values
+            if len(last_values) >= 2:
+                trend = np.mean(np.diff(last_values))
+                base_value = last_values[-1]
+                predictions = [base_value + trend * (i + 1) for i in range(steps)]
+            else:
+                predictions = [last_known_value] * steps
 
         # 生成预测日期（从最后日期开始的下一个月）
         last_date = df['日期'].max()
