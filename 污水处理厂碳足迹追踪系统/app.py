@@ -1565,7 +1565,10 @@ with tab5:
             if st.session_state.lstm_predictor.model is None:
                 try:
                     # 尝试加载预训练模型
-                    model_path = "models/carbon_lstm_model.h5"
+                    current_dir = os.path.dirname(os.path.abspath(__file__))
+                    models_dir = os.path.join(current_dir, "models")
+                    model_path = os.path.join(models_dir, "carbon_lstm_model.keras")
+
                     model_loaded = st.session_state.lstm_predictor.load_model(model_path)
                     if model_loaded:
                         st.success("✅ 预训练模型加载成功！")
@@ -1590,12 +1593,12 @@ with tab5:
                             prediction_df = st.session_state.lstm_predictor.predict(
                                 df_with_emissions,
                                 'total_CO2eq',
-                                steps=365  # 预测一年每天的数据
+                                steps=prediction_days  # 预测一年每天的数据
                             )
                         else:
                             # 使用简单预测方法
                             prediction_df = calculator._simple_emission_prediction(
-                                st.session_state.df, 365  # 预测一年
+                                st.session_state.df, prediction_days  # 预测一年
                             )
                             st.warning("使用简单预测方法生成数据")
 
@@ -1629,7 +1632,7 @@ with tab5:
                     try:
                         calculator = CarbonCalculator()
                         simple_prediction = calculator._simple_emission_prediction(
-                            st.session_state.df, 365  # 预测一年
+                            st.session_state.df, prediction_days  # 预测一年
                         )
 
                         # 转换为月度数据
