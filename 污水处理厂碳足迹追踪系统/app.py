@@ -1541,8 +1541,8 @@ with tab5:
     with train_col2:
         st.info("使用当前数据训练新的LSTM模型。需要先上传数据并确保数据包含足够的日期记录。")
 
-    # 在列外部显示训练历史图表（全宽显示）
-    if 'training_history' in st.session_state and st.session_state.training_history is not None:
+    # 在训练按钮代码块后添加以下内容（确保不在任何列内）
+    if st.session_state.get('training_history') is not None:
         st.subheader("训练历史")
         history_fig = vis.create_training_history_chart(st.session_state.training_history)
         st.plotly_chart(history_fig, use_container_width=True)
