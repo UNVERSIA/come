@@ -1434,6 +1434,7 @@ with tab5:
     st.subheader("1. 模型管理")
     load_col1, load_col2 = st.columns([1, 3])
     with load_col1:
+        # 在tab5中的"加载预训练模型"按钮逻辑
         if st.button("加载预训练模型", key="load_model_btn"):
             try:
                 # 初始化LSTM预测器
@@ -1442,20 +1443,33 @@ with tab5:
 
                 # 尝试加载预训练模型
                 model_path = "models/carbon_lstm_model.keras"
-                if os.path.exists(model_path):
-                    st.session_state.lstm_predictor.load_model(model_path)
-                    st.success("✅ 预训练模型加载成功！")
+                weights_path = "models/carbon_lstm_model.weights.h5"
+                architecture_path = "models/carbon_lstm_model_architecture.json"
+
+                # 检查模型文件是否存在
+                model_exists = os.path.exists(model_path)
+                weights_and_arch_exists = os.path.exists(weights_path) and os.path.exists(architecture_path)
+
+                if not model_exists and not weights_and_arch_exists:
+                    st.warning("⚠️ 未找到预训练模型，请先训练模型")
+                    # 确保预测器状态为未加载
+                    st.session_state.lstm_predictor.model = None
                 else:
-                    # 如果主模型文件不存在，尝试加载权重和架构
-                    weights_path = "models/carbon_lstm_model.weights.h5"
-                    architecture_path = "models/carbon_lstm_model_architecture.json"
-                    if os.path.exists(weights_path) and os.path.exists(architecture_path):
-                        st.session_state.lstm_predictor.load_model(model_path)  # 仍然传递主路径
-                        st.success("✅ 使用权重和架构加载模型成功！")
+                    # 尝试加载模型
+                    st.session_state.lstm_predictor.load_model(model_path)
+
+                    # 检查模型是否成功加载
+                    if st.session_state.lstm_predictor.model is not None:
+                        if model_exists:
+                            st.success("✅ 预训练模型加载成功！")
+                        else:
+                            st.success("✅ 使用权重和架构加载模型成功！")
                     else:
-                        st.warning("⚠️ 未找到预训练模型，请先训练模型")
+                        st.warning("⚠️ 模型加载失败，请先训练模型")
             except Exception as e:
                 st.error(f"加载模型失败: {str(e)}")
+                # 确保预测器状态为未加载
+                st.session_state.lstm_predictor.model = None
     with load_col2:
         st.info("加载已训练好的LSTM模型进行预测。如果模型不存在，将创建一个新的未训练模型。")
 
@@ -1704,10 +1718,14 @@ with tab5:
         tech_df = pd.DataFrame(tech_recommendations).T
         st.dataframe(tech_df)
 
-    # 显示模型状态
-    st.subheader("模型状态")
-    if st.session_state.lstm_predictor is not None:
-        st.success("✅ 模型已加载，可以进行预测")
+        # 显示模型状态
+        st.subheader("模型状态")
+        if st.session_state.lstm_predictor is not None and st.session_state.lstm_predictor.model is not None:
+            st.success("✅ 模型已加载，可以进行预测")
+        elif st.session_state.lstm_predictor is not None and st.session_state.lstm_predictor.model is None:
+            st.warning("⚠️ 模型未加载，请先加载或训练模型")
+        else:
+            st.warning("⚠️ 请先加载或训练模型")
 
         # 显示模型基本信息
         model = st.session_state.lstm_predictor.model
