@@ -1541,6 +1541,12 @@ with tab5:
     with train_col2:
         st.info("使用当前数据训练新的LSTM模型。需要先上传数据并确保数据包含足够的日期记录。")
 
+# 在列外部显示训练历史图表（全宽显示）
+if 'training_history' in st.session_state and st.session_state.training_history is not None:
+    st.subheader("训练历史")
+    history_fig = vis.create_training_history_chart(st.session_state.training_history)
+    st.plotly_chart(history_fig, use_container_width=True)
+
     # 第三部分：进行预测
     st.subheader("3. 预测设置")
     predict_col1, predict_col2 = st.columns([1, 3])
@@ -1708,41 +1714,129 @@ with tab5:
         # 添加前瞻性指导建议
         st.subheader("前瞻性运行指导建议")
 
-        # 计算趋势
-        current_avg = st.session_state.historical_data['total_CO2eq'].mean()
-        predicted_avg = st.session_state.prediction_data['predicted_CO2eq'].mean()
-        trend = "上升" if predicted_avg > current_avg else "下降"
-        change_percent = abs((predicted_avg - current_avg) / current_avg * 100)
+        if not st.session_state.prediction_data.empty:
+            # 计算更详细的趋势分析
+            current_avg = st.session_state.historical_data['total_CO2eq'].mean()
+            predicted_avg = st.session_state.prediction_data['predicted_CO2eq'].mean()
+            trend = "上升" if predicted_avg > current_avg else "下降"
+            change_percent = abs((predicted_avg - current_avg) / current_avg * 100)
 
-        # 根据趋势提供建议
-        if trend == "上升":
-            st.warning(f"⚠️ 预测显示未来碳排放将{trend}{change_percent:.1f}%")
-            st.info("""
-            **建议措施：**
-            - 检查曝气系统效率，优化曝气量控制
-            - 评估化学药剂投加量，避免过量使用
-            - 加强进水水质监控，预防冲击负荷
-            - 考虑实施节能技术改造
-            """)
-        else:
-            st.success(f"✅ 预测显示未来碳排放将{trend}{change_percent:.1f}%")
-            st.info("""
-            **保持措施：**
-            - 维持当前优化运行参数
-            - 继续监控关键工艺指标
-            - 定期维护设备确保高效运行
-            """)
+            # 分析趋势强度
+            trend_strength = "显著" if change_percent > 15 else "轻微" if change_percent > 5 else "平稳"
 
-        # 添加技术投资建议
+            # 分析季节性模式
+            historical_monthly = st.session_state.historical_data.copy()
+            historical_monthly['月份'] = historical_monthly['日期'].dt.month
+            monthly_avg = historical_monthly.groupby('月份')['total_CO2eq'].mean()
+
+            if len(monthly_avg) >= 6:  # 至少有半年数据
+                seasonal_variation = monthly_avg.max() - monthly_avg.min()
+                has_seasonal_pattern = seasonal_variation > monthly_avg.mean() * 0.2  # 变化超过20%认为有季节性
+            else:
+                has_seasonal_pattern = False
+
+            # 根据详细分析提供建议
+            if trend == "上升":
+                if trend_strength == "显著":
+                    st.error(f"⚠️ 预警：预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势！")
+                    st.info("""
+                    **紧急措施建议：**
+                    - 立即检查曝气系统运行效率，优化DO控制（目标1.5-2.5mg/L）
+                    - 全面评估化学药剂投加量，减少PAC/PAM过量使用
+                    - 加强进水水质监控，预防冲击负荷影响生化系统
+                    - 考虑实施变频控制改造，降低水泵/风机能耗
+                    - 检查污泥脱水系统运行，优化脱水剂投加
+                    """)
+                else:
+                    st.warning(f"⚠️ 预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势")
+                    st.info("""
+                    **优化建议：**
+                    - 检查曝气系统效率，优化曝气量控制
+                    - 评估化学药剂投加量，避免过量使用
+                    - 加强进水水质监控，预防冲击负荷
+                    - 考虑实施节能技术改造
+                    """)
+            else:
+                if trend_strength == "显著":
+                    st.success(f"✅ 良好：预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势！")
+                    st.info("""
+                    **巩固措施：**
+                    - 继续保持当前优化运行参数
+                    - 定期校准在线监测仪表，确保数据准确性
+                    - 记录并分析成功经验，形成标准化操作程序
+                    - 探索进一步优化空间，如精准加药控制系统
+                    """)
+                else:
+                    st.success(f"✅ 预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势")
+                    st.info("""
+                    **保持措施：**
+                    - 维持当前优化运行参数
+                    - 继续监控关键工艺指标
+                    - 定期维护设备确保高效运行
+                    """)
+
+            # 添加季节性建议
+            if has_seasonal_pattern:
+                peak_month = monthly_avg.idxmax()
+                st.info(f"📈 检测到季节性模式：碳排放通常在{peak_month}月达到峰值，建议提前制定应对措施")
+
+        # 添加技术投资建议（基于预测趋势动态推荐）
         st.subheader("减排技术投资建议")
-        tech_recommendations = {
-            "高效曝气系统": {"减排潜力": "15-25%", "投资回收期": "2-4年", "适用性": "高"},
-            "光伏发电": {"减排潜力": "20-30%", "投资回收期": "5-8年", "适用性": "中"},
-            "污泥厌氧消化": {"减排潜力": "10-20%", "投资回收期": "3-5年", "适用性": "中高"}
-        }
 
-        tech_df = pd.DataFrame(tech_recommendations).T
-        st.dataframe(tech_df)
+        if not st.session_state.prediction_data.empty:
+            # 根据预测趋势推荐技术
+            current_avg = st.session_state.historical_data['total_CO2eq'].mean()
+            predicted_avg = st.session_state.prediction_data['predicted_CO2eq'].mean()
+            trend = predicted_avg > current_avg  # True表示上升趋势
+
+            if trend:  # 碳排放上升趋势，推荐高效减排技术
+                tech_recommendations = {
+                    "高效曝气系统": {
+                        "减排潜力": "15-25%",
+                        "投资回收期": "2-4年",
+                        "适用性": "高",
+                        "推荐理由": "直接降低能耗最大的曝气系统电耗，应对上升趋势最有效"
+                    },
+                    "光伏发电": {
+                        "减排潜力": "20-30%",
+                        "投资回收期": "5-8年",
+                        "适用性": "中",
+                        "推荐理由": "利用厂区空间发电，抵消外购电力碳排放，长期效益好"
+                    },
+                    "智能加药系统": {
+                        "减排潜力": "10-20%",
+                        "投资回收期": "3-5年",
+                        "适用性": "高",
+                        "推荐理由": "精准控制药剂投加，减少化学药剂相关碳排放"
+                    }
+                }
+            else:  # 碳排放下降趋势，推荐维持性技术
+                tech_recommendations = {
+                    "设备能效提升": {
+                        "减排潜力": "5-15%",
+                        "投资回收期": "1-3年",
+                        "适用性": "高",
+                        "推荐理由": "更换高效水泵/风机，持续优化能耗表现"
+                    },
+                    "污泥厌氧消化": {
+                        "减排潜力": "10-20%",
+                        "投资回收期": "3-5年",
+                        "适用性": "中高",
+                        "推荐理由": "利用污泥产沼发电，实现能源回收"
+                    },
+                    "过程控制系统": {
+                        "减排潜力": "8-12%",
+                        "投资回收期": "2-4年",
+                        "适用性": "中",
+                        "推荐理由": "优化全厂运行参数，稳定保持低碳排放水平"
+                    }
+                }
+
+            tech_df = pd.DataFrame(tech_recommendations).T
+            st.dataframe(tech_df)
+
+            # 添加投资优先级建议
+            st.info("💡 投资优先级建议：根据投资回收期和减排潜力综合评估，建议优先考虑投资回收期短、减排潜力大的技术")
 
         # 显示模型状态
         st.subheader("模型状态")
