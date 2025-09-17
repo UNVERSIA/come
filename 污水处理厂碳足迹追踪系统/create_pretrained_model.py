@@ -5,6 +5,7 @@ from lstm_predictor import CarbonLSTMPredictor
 from data_simulator import DataSimulator
 import os
 
+
 def create_pretrained_model():
     """创建预训练模型"""
     # 确保目录存在
@@ -19,6 +20,26 @@ def create_pretrained_model():
     data_with_emissions = calculator.calculate_direct_emissions(data)
     data_with_emissions = calculator.calculate_indirect_emissions(data_with_emissions)
     data_with_emissions = calculator.calculate_unit_emissions(data_with_emissions)
+
+    # 确保所有必需的特征列都存在
+    predictor = CarbonLSTMPredictor()
+    for col in predictor.feature_columns:
+        if col not in data_with_emissions.columns:
+            if col == '处理水量(m³)':
+                data_with_emissions[col] = 10000
+            elif col == '电耗(kWh)':
+                data_with_emissions[col] = 3000
+            elif col in ['PAC投加量(kg)', 'PAM投加量(kg)', '次氯酸钠投加量(kg)']:
+                data_with_emissions[col] = 0
+            elif col in ['进水COD(mg/L)', '出水COD(mg/L)', '进水TN(mg/L)', '出水TN(mg/L)']:
+                if col == '进水COD(mg/L)':
+                    data_with_emissions[col] = 200
+                elif col == '出水COD(mg/L)':
+                    data_with_emissions[col] = 50
+                elif col == '进水TN(mg/L)':
+                    data_with_emissions[col] = 40
+                elif col == '出水TN(mg/L)':
+                    data_with_emissions[col] = 15
 
     # 获取当前文件所在目录的绝对路径
     current_dir = os.path.dirname(os.path.abspath(__file__))
