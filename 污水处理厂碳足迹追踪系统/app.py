@@ -1816,6 +1816,11 @@ with tab5:
                     else:
                         current_avg_daily = historical_data['total_CO2eq'].mean()
 
+                    # 确保当前日均值非负（碳排放量不能为负）
+                    if current_avg_daily < 0:
+                        st .error(f"错误: 当前日均排放量为负值 ({current_avg_daily:.2f})，这是不可能的。请检查数据计算过程。")
+                        current_avg_daily = 0  # 强制设为0
+
                     # 确保使用正确的预测数据
                     if not st.session_state.prediction_data.empty:
                         # 使用实际的预测数据计算平均值
@@ -1829,8 +1834,11 @@ with tab5:
                         if current_avg_daily > 0:
                             change = ((avg_prediction_daily - current_avg_daily) / current_avg_daily * 100)
                         else:
-                            change = 0
-                            st.warning("当前日均排放量为0，无法计算变化百分比")
+                            # 如果当前日均值为0，则变化率为无穷大，用绝对变化量代替
+                            change = (avg_prediction_daily - current_avg_daily)  # 绝对变化量
+                            # 但由于界面显示的是百分比，这里转换为百分比形式（相对于1）
+                            change = change * 100  # 显示为绝对变化量的100倍
+                            st .warning("当前日均排放量为0，使用绝对变化量代替百分比变化")
 
                         # 存储change值供后续使用
                         st.session_state.change_percent = change
