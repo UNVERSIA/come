@@ -2109,7 +2109,6 @@ with tab5:
 
                         st.info("这是基于历史平均值的简单预测，精度较低")
 
-        # 新增选项卡：减排技术分析
 with tab6:
     st.header("碳减排技术对比分析")
 
@@ -2253,44 +2252,6 @@ with tab6:
         with col3:
                         st.metric("碳减排贡献率", tech_detail["碳减排贡献率"])
                         st.metric("能源中和率", tech_detail["能源中和率"])
-
-    # 碳抵消计算
-    st.subheader("碳抵消计算")
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        biogas = st.number_input("沼气发电量(kWh)", value=1000, min_value=0)
-        st.session_state.carbon_offset_data["沼气发电"] = biogas * 2.5
-    with col2:
-        solar = st.number_input("光伏发电量(kWh)", value=500, min_value=0)
-        st.session_state.carbon_offset_data["光伏发电"] = solar * 0.85
-    with col3:
-        heatpump = st.number_input("热泵技术节能量(kWh)", value=300, min_value=0)
-        st.session_state.carbon_offset_data["热泵技术"] = heatpump * 1.2
-    with col4:
-        sludge = st.number_input("污泥资源化量(kgDS)", value=200, min_value=0)
-        st.session_state.carbon_offset_data["污泥资源化"] = sludge * 0.3
-
-    total_offset = sum(st.session_state.carbon_offset_data.values())
-    st.metric("总碳抵消量", f"{total_offset:.2f} kgCO2eq")
-
-    # 技术适用性分析
-    st.subheader("技术适用性分析")
-    selected_tech = st.selectbox(
-                "选择技术查看详情",
-                st.session_state.tech_comparison_data['技术名称'].tolist()
-    )
-
-    tech_details = st.session_state.tech_comparison_data[
-                st.session_state.tech_comparison_data['技术名称'] == selected_tech
-        ].iloc[0]
-
-    st.write(f"**{selected_tech}**")
-    st.write(f"- 预计年减排量: {tech_details['减排量_kgCO2eq']} kgCO2eq")
-    st.write(f"- 投资成本: {tech_details['投资成本_万元']} 万元")
-    st.write(f"- 投资回收期: {tech_details['回收期_年']} 年")
-    st.write(f"- 适用性: {tech_details['适用性']}")
-    st.write(f"- 碳减排贡献率: {tech_details['碳减排贡献率_%']}%")
-    st.write(f"- 能源中和率: {tech_details['能源中和率_%']}%")
 
     # 碳抵消计算
     st.subheader("碳抵消计算")
