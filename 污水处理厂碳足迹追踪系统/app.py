@@ -33,7 +33,38 @@ except ImportError as e:
     st.stop()
 
 # 页面配置
-st.set_page_config(page_title="污水处理厂碳足迹追踪系统", layout="wide", page_icon="🌍")
+st.set_page_config(
+    page_title="污水处理厂碳足迹追踪系统", 
+    layout="wide", 
+    page_icon="🌍",
+    initial_sidebar_state="expanded"
+)
+
+# 添加CSS样式强制浅色模式
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background-color: white;
+        color: black;
+    }
+    .st-bb {
+        background-color: white;
+    }
+    .st-at {
+        background-color: white;
+    }
+    .main .block-container {
+        background-color: white;
+        color: black;
+    }
+    h1, h2, h3, h4, h5, h6, p, div, span {
+        color: black !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 st.title("基于碳核算-碳账户模型的污水处理厂碳足迹追踪与评估系统")
 st.markdown("### 第七届全国大学生市政环境AI＋创新实践能力大赛-产业赛道项目")
 
@@ -1446,6 +1477,9 @@ with tab5:
                 # 构建模型文件的绝对路径
                 models_dir = os.path.join(current_dir, "models")
 
+                # 确保目录存在
+                os.makedirs(models_dir, exist_ok=True)
+
                 # 尝试多种可能的模型文件路径（使用绝对路径）
                 possible_model_paths = [
                     os.path.join(models_dir, "carbon_lstm_model.keras"),
@@ -1470,6 +1504,28 @@ with tab5:
                             st.warning(f"尝试加载模型 {model_path} 失败: {str(e)}")
                             continue
 
+                # 如果模型文件不存在，尝试从GitHub项目结构加载
+                if not model_loaded:
+                    # 尝试从GitHub项目结构加载模型
+                    github_model_paths = [
+                        os.path.join(current_dir, "碳足迹追踪系统", "models", "carbon_lstm_model.keras"),
+                        os.path.join(current_dir, "碳足迹追踪系统", "models", "carbon_lstm_model.h5"),
+                        os.path.join(current_dir, "碳足迹追踪系统", "models", "carbon_lstm.keras"),
+                        os.path.join(current_dir, "碳足迹追踪系统", "models", "carbon_lstm.h5")
+                    ]
+
+                    for model_path in github_model_paths:
+                        if os.path.exists(model_path):
+                            try:
+                                st.session_state.lstm_predictor.load_model(model_path)
+                                if st.session_state.lstm_predictor.model is not None:
+                                    model_loaded = True
+                                    loaded_path = model_path
+                                    break
+                            except Exception as e:
+                                st.warning(f"尝试加载模型 {model_path} 失败: {str(e)}")
+                                continue
+
                 if model_loaded:
                     st.success(f"✅ 预训练模型加载成功！从 {loaded_path} 加载")
                 else:
@@ -1480,13 +1536,14 @@ with tab5:
                         with st.spinner("未找到预训练模型，正在创建默认模型..."):
                             create_pretrained_model()
                             # 尝试加载新创建的模型
-                            st.session_state.lstm_predictor.load_model("models/carbon_lstm_model.keras")
+                            model_path = os.path.join(models_dir, "carbon_lstm_model.keras")
+                            st.session_state.lstm_predictor.load_model(model_path)
                             if st.session_state.lstm_predictor.model is not None:
                                 st.success("✅ 已创建并加载默认预训练模型！")
                             else:
                                 st.warning("⚠️ 创建默认模型失败，请先训练模型")
                     except Exception as e:
-                        st.warning("⚠️ 未找到预训练模型，请先训练模型")
+                        st.warning(f"⚠️ 未找到预训练模型，请先训练模型: {str(e)}")
             except Exception as e:
                 st.error(f"加载模型失败: {str(e)}")
                 # 确保预测器状态为未加载
@@ -1785,18 +1842,29 @@ with tab5:
         # 添加前瞻性指导建议
         st.subheader("前瞻性运行指导建议")
 
-        if not st.session_state.prediction_data.empty:
-            # 计算更详细的趋势分析
-            current_avg = st.session_state.historical_data['total_CO2eq'].mean()
+        if not st.session_state.prediction_data.empty and not st.session_state.historical_data.empty:
+            # 使用历史数据的最近一年与预测数据进行比较
+            historical_data = st.session_state.historical_data.copy()
+            historical_data['日期'] = pd.to_datetime(historical_data['日期'])
+
+            # 获取最近一年的数据
+            latest_year = historical_data['日期'].dt.year.max()
+            recent_data = historical_data[historical_data['日期'].dt.year == latest_year]
+
+            if len(recent_data) > 0:
+                current_avg = recent_data['total_CO2eq'].mean()
+            else:
+                current_avg = historical_data['total_CO2eq'].mean()
+
             predicted_avg = st.session_state.prediction_data['predicted_CO2eq'].mean()
             trend = "上升" if predicted_avg > current_avg else "下降"
-            change_percent = abs((predicted_avg - current_avg) / current_avg * 100)
+            change_percent = abs((predicted_avg - current_avg) / current_avg * 100) if current_avg > 0 else 0
 
             # 分析趋势强度
             trend_strength = "显著" if change_percent > 15 else "轻微" if change_percent > 5 else "平稳"
 
             # 分析季节性模式
-            historical_monthly = st.session_state.historical_data.copy()
+            historical_monthly = historical_data.copy()
             historical_monthly['月份'] = historical_monthly['日期'].dt.month
             monthly_avg = historical_monthly.groupby('月份')['total_CO2eq'].mean()
 
