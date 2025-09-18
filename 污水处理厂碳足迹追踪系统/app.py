@@ -48,25 +48,117 @@ def initialize_session_state():
     if 'selected_month' not in st.session_state:
         st.session_state.selected_month = None
     if 'unit_data' not in st.session_state:
+        # 基于典型污水处理厂设计参数的单元数据
+        base_flow = 10000.0  # m³/d 基准流量
+
         st.session_state.unit_data = {
-            "粗格栅": {"water_flow": 10000.0, "energy": 1500.0, "emission": 450.0, "enabled": True},
-            "提升泵房": {"water_flow": 10000.0, "energy": 3500.0, "emission": 1050.0, "enabled": True},
-            "细格栅": {"water_flow": 10000.0, "energy": 800.0, "emission": 240.0, "enabled": True},
-            "曝气沉砂池": {"water_flow": 10000.0, "energy": 1200.0, "emission": 360.0, "enabled": True},
-            "膜格栅": {"water_flow": 10000.0, "energy": 1000.0, "emission": 300.0, "enabled": True},
-            "厌氧池": {"water_flow": 10000.0, "energy": 3000.0, "TN_in": 40.0, "TN_out": 30.0, "COD_in": 200.0,
-                       "COD_out": 180.0, "emission": 1200.0, "enabled": True},
-            "缺氧池": {"water_flow": 10000.0, "energy": 3500.0, "TN_in": 30.0, "TN_out": 20.0, "COD_in": 180.0,
-                       "COD_out": 100.0, "emission": 1500.0, "enabled": True},
-            "好氧池": {"water_flow": 10000.0, "energy": 5000.0, "TN_in": 20.0, "TN_out": 15.0, "COD_in": 100.0,
-                       "COD_out": 50.0, "emission": 1800.0, "enabled": True},
-            "MBR膜池": {"water_flow": 10000.0, "energy": 4000.0, "emission": 1200.0, "enabled": True},
-            "污泥处理车间": {"water_flow": 500.0, "energy": 2000.0, "PAM": 100.0, "emission": 800.0, "enabled": True},
-            "DF系统": {"water_flow": 10000.0, "energy": 2500.0, "PAC": 300.0, "emission": 1000.0, "enabled": True},
-            "催化氧化": {"water_flow": 10000.0, "energy": 1800.0, "emission": 700.0, "enabled": True},
-            "鼓风机房": {"water_flow": 0.0, "energy": 2500.0, "emission": 900.0, "enabled": True},
-            "消毒接触池": {"water_flow": 10000.0, "energy": 1000.0, "emission": 400.0, "enabled": True},
-            "除臭系统": {"water_flow": 0.0, "energy": 1800.0, "emission": 600.0, "enabled": True}
+            # 预处理区单元 - 基于实际工程经验
+            "粗格栅": {
+                "water_flow": base_flow,
+                "energy": base_flow * 0.12,  # 0.12 kWh/m³ 典型格栅能耗
+                "emission": 0, "enabled": True,  # 排放量将动态计算
+                "design_params": {"grid_spacing": 20, "flow_velocity": 0.9}  # mm, m/s
+            },
+            "提升泵房": {
+                "water_flow": base_flow,
+                "energy": base_flow * 0.15,  # 0.15 kWh/m³ 典型泵房能耗
+                "emission": 0, "enabled": True,
+                "design_params": {"pump_efficiency": 0.85, "head": 8}  # 效率, 扬程m
+            },
+            "细格栅": {
+                "water_flow": base_flow,
+                "energy": base_flow * 0.08,  # 0.08 kWh/m³
+                "emission": 0, "enabled": True,
+                "design_params": {"grid_spacing": 5, "cleaning_freq": 6}  # mm, 次/h
+            },
+            "曝气沉砂池": {
+                "water_flow": base_flow,
+                "energy": base_flow * 0.10,  # 0.10 kWh/m³ 曝气能耗
+                "emission": 0, "enabled": True,
+                "design_params": {"retention_time": 2, "air_ratio": 0.2}  # min, m³air/m³water
+            },
+            "膜格栅": {
+                "water_flow": base_flow,
+                "energy": base_flow * 0.05,  # 0.05 kWh/m³
+                "emission": 0, "enabled": True,
+                "design_params": {"mesh_size": 1, "backwash_freq": 4}  # mm, 次/h
+            },
+
+            # 生物处理区单元
+            "厌氧池": {
+                "water_flow": base_flow,
+                "energy": base_flow * 0.02,  # 0.02 kWh/m³ 搅拌能耗
+                "TN_in": 40.0, "TN_out": 38.0,
+                "COD_in": 220.0, "COD_out": 180.0,
+                "emission": 0, "enabled": True,
+                "design_params": {"retention_time": 3.5, "temp": 18}  # h, °C
+            },
+            "缺氧池": {
+                "water_flow": base_flow,
+                "energy": base_flow * 0.08,  # 0.08 kWh/m³ 搅拌和内回流
+                "TN_in": 38.0, "TN_out": 25.0,
+                "COD_in": 180.0, "COD_out": 120.0,
+                "emission": 0, "enabled": True,
+                "design_params": {"retention_time": 2.0, "internal_recycle": 200}  # h, %
+            },
+            "好氧池": {
+                "water_flow": base_flow,
+                "energy": base_flow * 0.25,  # 0.25 kWh/m³ 主要曝气能耗
+                "TN_in": 25.0, "TN_out": 15.0,
+                "COD_in": 120.0, "COD_out": 45.0,
+                "emission": 0, "enabled": True,
+                "design_params": {"retention_time": 6.0, "DO_setpoint": 2.5, "MLSS": 3500}  # h, mg/L, mg/L
+            },
+            "MBR膜池": {
+                "water_flow": base_flow,
+                "energy": base_flow * 0.35,  # 0.35 kWh/m³ 膜曝气+产水
+                "emission": 0, "enabled": True,
+                "design_params": {"flux": 15, "TMP": 15, "cleaning_cycle": 30}  # L/m²h, kPa, day
+            },
+
+            # 深度处理区单元
+            "DF系统": {
+                "water_flow": base_flow,
+                "energy": base_flow * 0.18,  # 0.18 kWh/m³
+                "PAC": base_flow * 0.012,  # 12 mg/L PAC投加
+                "emission": 0, "enabled": True,
+                "design_params": {"filtration_rate": 8, "backwash_freq": 24}  # m/h, h
+            },
+            "催化氧化": {
+                "water_flow": base_flow,
+                "energy": base_flow * 0.22,  # 0.22 kWh/m³ 臭氧接触+催化
+                "emission": 0, "enabled": True,
+                "design_params": {"contact_time": 20, "catalyst_type": "Fe-Mn"}  # min
+            },
+
+            # 污泥处理区
+            "污泥处理车间": {
+                "water_flow": base_flow * 0.03,  # 污泥量约为处理水量3%
+                "energy": base_flow * 0.08,  # 0.08 kWh/m³
+                "PAM": base_flow * 0.002,  # 2 mg/L PAM投加
+                "emission": 0, "enabled": True,
+                "design_params": {"dry_solids": 25, "dewater_efficiency": 95}  # %, %
+            },
+
+            # 辅助单元
+            "鼓风机房": {
+                "water_flow": 0.0,  # 不处理水，仅供气
+                "energy": base_flow * 0.15,  # 0.15 kWh/m³ 供气能耗
+                "emission": 0, "enabled": True,
+                "design_params": {"pressure": 60, "efficiency": 0.75}  # kPa, %
+            },
+            "消毒接触池": {
+                "water_flow": base_flow,
+                "energy": base_flow * 0.02,  # 0.02 kWh/m³ 搅拌能耗
+                "emission": 0, "enabled": True,
+                "design_params": {"contact_time": 30, "disinfectant": "NaClO"}  # min
+            },
+            "除臭系统": {
+                "water_flow": 0.0,  # 处理臭气
+                "energy": base_flow * 0.05,  # 0.05 kWh/m³ 风机+喷淋
+                "emission": 0, "enabled": True,
+                "design_params": {"air_volume": 5000, "removal_efficiency": 85}  # m³/h, %
+            }
         }
     if 'custom_calculations' not in st.session_state:
         st.session_state.custom_calculations = {}
