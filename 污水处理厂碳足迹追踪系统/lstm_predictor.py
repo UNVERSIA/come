@@ -28,13 +28,10 @@ class CarbonLSTMPredictor:
         self.scaler = MinMaxScaler()
         self.feature_scalers = {}
         self.target_scaler = MinMaxScaler()
-        # 扩展特征列，包含更多关键工艺参数
         self.feature_columns = [
             '处理水量(m³)', '电耗(kWh)', 'PAC投加量(kg)',
             'PAM投加量(kg)', '次氯酸钠投加量(kg)',
-            '进水COD(mg/L)', '出水COD(mg/L)', '进水TN(mg/L)', '出水TN(mg/L)',
-            # 新增关键特征
-            'COD去除率', 'TN去除率', '有机负荷', '氮负荷'
+            '进水COD(mg/L)', '出水COD(mg/L)', '进水TN(mg/L)', '出水TN(mg/L)'
         ]
         self.start_date = pd.Timestamp('2018-01-01')
         self.end_date = pd.Timestamp('2024-12-31')
@@ -98,7 +95,7 @@ class CarbonLSTMPredictor:
             shuffle=True
         )
 
-        # 保存模型
+        # 保存模型和缩放器
         self.model.save(save_path)
 
         # 保存元数据
@@ -164,9 +161,6 @@ class CarbonLSTMPredictor:
         if len(df) < self.sequence_length + 1:
             raise ValueError(f"需要至少 {self.sequence_length + 1} 个月的记录进行训练，当前只有 {len(df)} 个月")
 
-        # 计算衍生特征
-        df = self._calculate_derived_features(df)
-
         # 确保所有必需的特征列都存在
         for col in self.feature_columns:
             if col not in df.columns:
@@ -209,42 +203,6 @@ class CarbonLSTMPredictor:
 
         print(f"成功创建 {len(X)} 个月度训练序列")
         return np.array(X), np.array(y)
-
-    def _calculate_derived_features(self, df):
-        """计算衍生特征"""
-        df = df.copy()
-
-        # COD去除率
-        if '进水COD(mg/L)' in df.columns and '出水COD(mg/L)' in df.columns:
-            df['COD去除率'] = np.where(df['进水COD(mg/L)'] > 0,
-                                           (df['进水COD(mg/L)'] - df['出水COD(mg/L)']) / df['进水COD(mg/L)'],
-                                           0)
-            df['COD去除率'] = np.clip(df['COD去除率'], 0, 1)
-        else:
-            df['COD去除率'] = 0.85  # 默认去除率
-
-        # TN去除率
-        if '进水TN(mg/L)' in df.columns and '出水TN(mg/L)' in df.columns:
-            df['TN去除率'] = np.where(df['进水TN(mg/L)'] > 0,
-                                          (df['进水TN(mg/L)'] - df['出水TN(mg/L)']) / df['进水TN(mg/L)'],
-                                          0)
-            df['TN去除率'] = np.clip(df['TN去除率'], 0, 1)
-        else:
-            df['TN去除率'] = 0.75  # 默认去除率
-
-        # 有机负荷 kg COD/d
-        if '处理水量(m³)' in df.columns and '进水COD(mg/L)' in df.columns:
-            df['有机负荷'] = df['处理水量(m³)'] * df['进水COD(mg/L)'] / 1000
-        else:
-            df['有机负荷'] = 2000  # 默认值
-
-        # 氮负荷 kg N/d
-        if '处理水量(m³)' in df.columns and '进水TN(mg/L)' in df.columns:
-            df['氮负荷'] = df['处理水量(m³)'] * df['进水TN(mg/L)'] / 1000
-        else:
-            df['氮负荷'] = 400  # 默认值
-
-        return df
 
     def predict(self, df, target_column='total_CO2eq', steps=12):
         """月度预测方法"""
@@ -527,11 +485,7 @@ class CarbonLSTMPredictor:
             '出水COD(mg/L)': 50.0,
             '进水TN(mg/L)': 40.0,
             '出水TN(mg/L)': 15.0,
-            'total_CO2eq': 1000.0,
-            'COD去除率': 0.85,
-            'TN去除率': 0.75,
-            '有机负荷': 2000.0,
-            '氮负荷': 400.0
+            'total_CO2eq': 1000.0
         }
         return defaults.get(col_name, 0.0)
 
