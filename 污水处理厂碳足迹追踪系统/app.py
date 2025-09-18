@@ -32,8 +32,33 @@ except ImportError as e:
     st.info("请确保所有依赖文件都在同一目录下")
     st.stop()
 
-# 页面配置
-st.set_page_config(page_title="污水处理厂碳足迹追踪系统", layout="wide", page_icon="🌍")
+# 页面配置 - 强制使用浅色模式
+st.set_page_config(
+    page_title="污水处理厂碳足迹追踪系统",
+    layout="wide",
+    page_icon="🌍",
+    initial_sidebar_state="expanded"
+)
+
+# 添加CSS强制浅色模式
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background-color: white;
+        color: black;
+    }
+    .css-1d391kg, .css-1v0mbdj, .css-1v0mbdj edgvbvh1, .css-1v0mbdj edgvbvh3 {
+        background-color: white !important;
+        color: black !important;
+    }
+    .css-1v0mbdj edgvbvh5 {
+        color: black !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 st.title("基于碳核算-碳账户模型的污水处理厂碳足迹追踪与评估系统")
 st.markdown("### 第七届全国大学生市政环境AI＋创新实践能力大赛-产业赛道项目")
 
@@ -1600,13 +1625,25 @@ with tab5:
         model_loaded = False
         if st.session_state.lstm_predictor.model is None:
             try:
-                # 尝试加载预训练模型
+                # 尝试加载预训练模型 - 修复路径问题
                 current_dir = os.path.dirname(os.path.abspath(__file__))
+
+                # 检查是否在GitHub项目结构下
+                github_project_dir = os.path.join(current_dir, "碳足迹追踪系统")
+                if os.path.exists(github_project_dir):
+                    current_dir = github_project_dir
+
                 models_dir = os.path.join(current_dir, "models")
                 model_path = os.path.join(models_dir, "carbon_lstm_model.keras")
 
                 # 确保目录存在
                 os.makedirs(models_dir, exist_ok=True)
+
+                # 调试信息
+                st.info(f"当前目录: {current_dir}")
+                st.info(f"模型目录: {models_dir}")
+                st.info(f"模型路径: {model_path}")
+                st.info(f"模型文件存在: {os.path.exists(model_path)}")
 
                 # 如果模型文件不存在，尝试创建默认模型
                 if not os.path.exists(model_path):
