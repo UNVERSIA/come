@@ -222,17 +222,41 @@ class CarbonLSTMPredictor:
         self.feature_scalers = {}
         valid_features = []
 
-        # 只处理实际存在的特征列
+        # 确保所有特征列都有缩放器
         for col in self.feature_columns:
+            self.feature_scalers[col] = MinMaxScaler()
+
+            # 获取特征数据（如果列不存在，使用默认值）
             if col in df.columns and not df[col].isna().all():
-                self.feature_scalers[col] = MinMaxScaler()
-                # 只使用非NaN值进行拟合
                 valid_values = df[col].dropna().values.reshape(-1, 1)
                 if len(valid_values) > 0:
                     self.feature_scalers[col].fit(valid_values)
                     valid_features.append(col)
+                else:
+                    # 使用典型默认值拟合
+                    default_value = self._get_default_value(col)
+                    self.feature_scalers[col].fit(np.array([[default_value]]))
             else:
-                print(f"警告: 特征列 '{col}' 不存在或全部为NaN值，将跳过")
+                # 使用典型默认值拟合
+                default_value = self._get_default_value(col)
+                self.feature_scalers[col].fit(np.array([[default_value]]))
+                print(f"警告: 特征列 '{col}' 不存在或全部为NaN值，使用默认值 {default_value}")
+
+        # 添加辅助方法获取默认值
+        def _get_default_value(self, col_name):
+            """获取特征的典型默认值"""
+            defaults = {
+                '处理水量(m³)': 10000.0,
+                '电耗(kWh)': 3000.0,
+                'PAC投加量(kg)': 0.0,
+                'PAM投加量(kg)': 0.0,
+                '次氯酸钠投加量(kg)': 0.0,
+                '进水COD(mg/L)': 200.0,
+                '出水COD(mg/L)': 50.0,
+                '进水TN(mg/L)': 40.0,
+                '出水TN(mg/L)': 15.0
+            }
+            return defaults.get(col_name, 0.0)
 
         # 确保所有特征都有缩放器，即使列不存在
         for col in self.feature_columns:
@@ -557,6 +581,9 @@ class CarbonLSTMPredictor:
         # 获取最后一天的日期作为基准
         last_date = df['日期'].max() if '日期' in df.columns else pd.Timestamp.now()
 
+        # 创建序列副本用于递归预测
+        current_sequence_copy = np.copy(current_sequence)
+
         for i in range(steps):
             # 预测下一步
             try:
@@ -583,6 +610,28 @@ class CarbonLSTMPredictor:
             pred = max(pred, max(0, historical_mean - 3 * historical_std))
 
             predictions.append(pred)
+
+            # 更新输入序列用于下一步预测（递归预测）
+            # 移除序列中最老的时间步
+            updated_sequence = current_sequence_copy[:, 1:, :]
+
+            # 创建新的时间步数据（使用预测值更新碳排放特征，其他特征使用最后已知值）
+            new_timestep = np.copy(current_sequence_copy[:, -1:, :])
+
+            # 更新碳排放特征（目标变量）
+            # 找到目标特征在特征列表中的位置
+            target_idx = self.feature_columns.index('total_CO2eq') if 'total_CO2eq' in self.feature_columns else -1
+
+            if target_idx >= 0:
+                # 缩放预测值以匹配特征尺度
+                pred_scaled_for_features = self.target_scaler.transform([[pred]])[0][0]
+                new_timestep[0, 0, target_idx] =pred_scaled_for_features
+
+            # 将新时间步添加到序列末尾
+            updated_sequence = np.concatenate([updated_sequence, new_timestep], axis=1)
+
+            # 更新当前序列
+            current_sequence_copy = updated_sequence
 
             # 计算置信区间（基于历史误差）
             if len(historical_values) > 10:
@@ -637,28 +686,20 @@ class CarbonLSTMPredictor:
             padded_df = pd.concat([df] * (pad_length // len(df) + 1), ignore_index=True)
             df = padded_df.head(self.sequence_length)
 
-        # 确保所有特征列都存在
+        # 确保所有特征列都存在且有有效数据
         for col in self.feature_columns:
-            if col not in df.columns:
+            if col not in df.columns or df[col].isna().all():
                 # 使用默认值填充缺失特征
-                if col == '处理水量(m³)':
-                    df[col] = 10000  # 默认处理水量
-                elif col == '电耗(kWh)':
-                    df[col] = 3000  # 默认电耗
-                elif col in ['PAC投加量(kg)', 'PAM投加量(kg)', '次氯酸钠投加量(kg)']:
-                    df[col] = 0  # 默认药剂投加量
-                elif col in ['进水COD(mg/L)', '出水COD(mg/L)', '进水TN(mg/L)', '出水TN(mg/L)']:
-                    # 根据典型污水处理厂水质设置默认值
-                    if col == '进水COD(mg/L)':
-                        df[col] = 200
-                    elif col == '出水COD(mg/L)':
-                        df[col] = 50
-                    elif col == '进水TN(mg/L)':
-                        df[col] = 40
-                    elif col == '出水TN(mg/L)':
-                        df[col] = 15
-                else:
-                    df[col] = 0
+                default_value = self._get_default_value(col)
+                df[col] = default_value
+                print(f"警告: 特征列 '{col}' 不存在或全部为NaN值，使用默认值 {default_value}")
+            elif df[col].isna().any():
+                # 填充NaN值
+                col_mean = df[col].mean()
+                if np.isnan(col_mean):  # 如果均值也是NaN，使用默认值
+                    col_mean = self._get_default_value(col)
+                df[col] = df[col].fillna(col_mean)
+                print(f"警告: 特征列 '{col}' 包含NaN值，使用均值 {col_mean} 填充")
 
         # 创建序列
         sequences = []
