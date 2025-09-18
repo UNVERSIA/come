@@ -1821,31 +1821,53 @@ with tab5:
                         st .error(f"错误: 当前日均排放量为负值 ({current_avg_daily:.2f})，这是不可能的。请检查数据计算过程。")
                         current_avg_daily = 0  # 强制设为0
 
-                    # 确保使用正确的预测数据
-                    if not st.session_state.prediction_data.empty:
-                        # 使用实际的预测数据计算平均值
-                        avg_prediction = st.session_state.prediction_data['predicted_CO2eq'].mean()
+                        # 确保使用正确的预测数据
+                        if not st.session_state.prediction_data.empty:
+                            # 使用实际的预测数据计算平均值
+                            avg_prediction = st.session_state.prediction_data['predicted_CO2eq'].mean()
 
-                        # 预测数据是月度的，需要转换为日平均值（假设每月30天）
-                        days_in_month = 30
-                        avg_prediction_daily = avg_prediction / days_in_month
+                            # 关键修复：判断预测数据的时间单位
+                            # 检查预测数据是否为月度数据
+                            is_monthly_prediction = 'year_month' in st.session_state.prediction_data.columns or len(
+                                st.session_state.prediction_data) <= 12
 
-                        # 确保分母不为零
-                        if current_avg_daily > 0:
-                            change = ((avg_prediction_daily - current_avg_daily) / current_avg_daily * 100)
-                        else:
-                            # 如果当前日均值为0，则变化率为无穷大，用绝对变化量代替
-                            change = (avg_prediction_daily - current_avg_daily)  # 绝对变化量
-                            # 但由于界面显示的是百分比，这里转换为百分比形式（相对于1）
-                            change = change * 100  # 显示为绝对变化量的100倍
-                            st .warning("当前日均排放量为0，使用绝对变化量代替百分比变化")
+                            if is_monthly_prediction:
+                                # 如果是月度预测，需要与历史日度数据的月度聚合比较
+                                historical_monthly_avg = \
+                                historical_data.groupby(historical_data['日期'].dt.to_period('M'))[
+                                    'total_CO2eq'].mean().mean()
+                                current_comparison_value = historical_monthly_avg
+                                avg_prediction_comparison = avg_prediction
+                                comparison_unit = "月均值"
+                            else:
+                                # 如果是日度预测，直接比较
+                                current_comparison_value = current_avg_daily
+                                avg_prediction_comparison = avg_prediction
+                                comparison_unit = "日均值"
 
-                        # 存储change值供后续使用
-                        st.session_state.change_percent = change
+                            # 确保分母不为零且计算合理的变化率
+                            if current_comparison_value > 0:
+                                change = ((
+                                                      avg_prediction_comparison - current_comparison_value) / current_comparison_value * 100)
 
-                        # 添加调试信息
-                        st.write(
-                            f"调试信息 - 当前日均值: {current_avg_daily:.2f}, 预测日均值: {avg_prediction_daily:.2f}, 变化: {change:.2f}%")
+                                # 添加合理性检查 - 碳排放变化通常不会超过±50%
+                                if abs(change) > 50:
+                                    st.warning(f"检测到异常的变化率 {change:.1f}%，可能存在数据单位或计算错误")
+                                    # 重新计算，假设预测数据为日度数据
+                                    change_alt = ((avg_prediction - current_avg_daily) / current_avg_daily * 100)
+                                    if abs(change_alt) < abs(change):
+                                        change = change_alt
+                                        comparison_unit = "日均值(修正)"
+                            else:
+                                change = 0
+                                st.warning("历史数据平均值为0，无法计算变化率")
+
+                            # 存储change值供后续使用
+                            st.session_state.change_percent = change
+
+                            # 添加调试信息
+                            st.info(
+                                f"数据对比 - 历史{comparison_unit}: {current_comparison_value:.2f}, 预测{comparison_unit}: {avg_prediction_comparison:.2f}, 变化: {change:.2f}%")
                     else:
                         st.warning("没有预测数据可用于趋势计算")
                         st.session_state.change_percent = 0
