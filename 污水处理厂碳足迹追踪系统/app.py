@@ -2110,86 +2110,86 @@ with tab5:
                         st.info("这是基于历史平均值的简单预测，精度较低")
 
         # 新增选项卡：减排技术分析
-            with tab6:
-                st.header("碳减排技术对比分析")
+with tab6:
+    st.header("碳减排技术对比分析")
 
-                # 技术选择
-                selected_techs = st.multiselect(
+    # 技术选择
+    selected_techs = st.multiselect(
                     "选择对比技术",
                     ["厌氧消化产沼", "光伏发电", "高效曝气", "热泵技术", "污泥干化", "沼气发电"],
                     default=["厌氧消化产沼", "光伏发电", "高效曝气"]
-                )
+    )
 
-                # 始终显示技术说明
-                st.subheader("可选减排技术说明")
-                tech_descriptions = {
+    # 始终显示技术说明
+    st.subheader("可选减排技术说明")
+    tech_descriptions = {
                     "厌氧消化产沼": "利用污泥厌氧消化产生沼气发电，减少外购电力碳排放",
                     "光伏发电": "在厂区屋顶安装光伏板，利用太阳能发电抵消部分电力碳排放",
                     "高效曝气": "采用微孔曝气、变频控制等技术，降低生物处理单元能耗",
                     "热泵技术": "利用污水余热进行加热，减少辅助加热设备能耗",
                     "污泥干化": "污泥干化后资源化利用，减少污泥处置碳排放",
                     "沼气发电": "收集处理过程中产生的沼气进行发电，实现能源回收"
-                }
+    }
 
-                for tech, desc in tech_descriptions.items():
-                    st.write(f"**{tech}**: {desc}")
+    for tech, desc in tech_descriptions.items():
+        st.write(f"**{tech}**: {desc}")
 
-                st.subheader("技术对比分析")
-                if st.button("运行技术对比分析"):
-                    with st.spinner("正在进行技术对比分析..."):
-                        try:
-                            calculator = CarbonCalculator()
-                            comparison_results = calculator.compare_carbon_techs(
+    st.subheader("技术对比分析")
+    if st.button("运行技术对比分析"):
+        with st.spinner("正在进行技术对比分析..."):
+            try:
+                calculator = CarbonCalculator()
+                comparison_results = calculator.compare_carbon_techs(
                                 selected_techs,
                                 st.session_state.df_selected if 'df_selected' in st.session_state else None
-                            )
-                            st.session_state.tech_comparison_results = comparison_results
+                )
+                st.session_state.tech_comparison_results = comparison_results
 
-                            # 显示技术对比图表
-                            tech_fig = vis.create_technology_comparison(comparison_results)
-                            st.plotly_chart(tech_fig)
+                # 显示技术对比图表
+                tech_fig = vis.create_technology_comparison(comparison_results)
+                st.plotly_chart(tech_fig)
 
-                            # 显示详细对比表格
-                            st.subheader("技术经济性分析")
-                            st.dataframe(comparison_results)
+                # 显示详细对比表格
+                st.subheader("技术经济性分析")
+                st.dataframe(comparison_results)
 
-                            st.success("✅ 技术对比分析完成！")
+                st.success("✅ 技术对比分析完成！")
 
-                        except Exception as e:
-                            st.error(f"技术对比分析失败: {str(e)}")
-                            # 显示默认对比数据
-                            st.info("显示默认技术对比数据")
-                            default_comparison = pd.DataFrame({
+            except Exception as e:
+                st.error(f"技术对比分析失败: {str(e)}")
+                # 显示默认对比数据
+                st.info("显示默认技术对比数据")
+                default_comparison = pd.DataFrame({
                                 '技术名称': selected_techs,
                                 '减排量_kgCO2eq': [15000, 8000, 6000, 4500, 3000, 12000][:len(selected_techs)],
                                 '投资成本_万元': [500, 300, 200, 150, 100, 400][:len(selected_techs)],
                                 '回收期_年': [5, 8, 4, 6, 7, 5][:len(selected_techs)],
                                 '适用性': ['高', '中', '高', '中', '低', '高'][:len(selected_techs)]
-                            })
-                            st.dataframe(default_comparison)
+                })
+                st.dataframe(default_comparison)
 
-                # 显示历史对比结果（如果存在）
-                if hasattr(st.session_state,
-                           'tech_comparison_results') and st.session_state.tech_comparison_results is not None:
-                    st.subheader("历史对比结果")
-                    tech_fig = vis.create_technology_comparison(st.session_state.tech_comparison_results)
-                    st.plotly_chart(tech_fig)
+    # 显示历史对比结果（如果存在）
+    if hasattr(st.session_state,
+                'tech_comparison_results') and st.session_state.tech_comparison_results is not None:
+        st.subheader("历史对比结果")
+        tech_fig = vis.create_technology_comparison(st.session_state.tech_comparison_results)
+        st.plotly_chart(tech_fig)
 
-                    # 技术详情表格
-                    st.subheader("减排技术详情")
-                    st.dataframe(st.session_state.tech_comparison_results)
-                else:
-                    st.info("💡 请点击'运行技术对比分析'按钮，基于当前工厂数据生成技术对比分析")
+        # 技术详情表格
+        st.subheader("减排技术详情")
+        st.dataframe(st.session_state.tech_comparison_results)
+    else:
+        st.info("💡 请点击'运行技术对比分析'按钮，基于当前工厂数据生成技术对比分析")
 
-                # 技术适用性分析
-                st.subheader("技术适用性分析")
-                selected_tech = st.selectbox(
+    # 技术适用性分析
+    st.subheader("技术适用性分析")
+    selected_tech = st.selectbox(
                     "选择技术查看详情",
                     ["厌氧消化产沼", "光伏发电", "高效曝气", "热泵技术", "污泥干化", "沼气发电"]
-                )
+    )
 
-                # 技术详细信息
-                tech_details = {
+    # 技术详细信息
+    tech_details = {
                     "厌氧消化产沼": {
                         "预计年减排量": "15000 kgCO2eq",
                         "投资成本": "500 万元",
@@ -2238,94 +2238,94 @@ with tab5:
                         "碳减排贡献率": "20%",
                         "能源中和率": "35%"
                     }
-                }
+    }
 
-                if selected_tech in tech_details:
-                    tech_detail = tech_details[selected_tech]
-                    st.write(f"**{selected_tech}**")
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
+    if selected_tech in tech_details:
+        tech_detail = tech_details[selected_tech]
+        st.write(f"**{selected_tech}**")
+        col1, col2, col3 = st.columns(3)
+        with col1:
                         st.metric("预计年减排量", tech_detail["预计年减排量"])
                         st.metric("投资成本", tech_detail["投资成本"])
-                    with col2:
+        with col2:
                         st.metric("投资回收期", tech_detail["投资回收期"])
                         st.metric("适用性", tech_detail["适用性"])
-                    with col3:
+        with col3:
                         st.metric("碳减排贡献率", tech_detail["碳减排贡献率"])
                         st.metric("能源中和率", tech_detail["能源中和率"])
 
-                # 碳抵消计算
-                st.subheader("碳抵消计算")
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    biogas = st.number_input("沼气发电量(kWh)", value=1000, min_value=0)
-                    st.session_state.carbon_offset_data["沼气发电"] = biogas * 2.5
-                with col2:
-                    solar = st.number_input("光伏发电量(kWh)", value=500, min_value=0)
-                    st.session_state.carbon_offset_data["光伏发电"] = solar * 0.85
-                with col3:
-                    heatpump = st.number_input("热泵技术节能量(kWh)", value=300, min_value=0)
-                    st.session_state.carbon_offset_data["热泵技术"] = heatpump * 1.2
-                with col4:
-                    sludge = st.number_input("污泥资源化量(kgDS)", value=200, min_value=0)
-                    st.session_state.carbon_offset_data["污泥资源化"] = sludge * 0.3
+    # 碳抵消计算
+    st.subheader("碳抵消计算")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        biogas = st.number_input("沼气发电量(kWh)", value=1000, min_value=0)
+        st.session_state.carbon_offset_data["沼气发电"] = biogas * 2.5
+    with col2:
+        solar = st.number_input("光伏发电量(kWh)", value=500, min_value=0)
+        st.session_state.carbon_offset_data["光伏发电"] = solar * 0.85
+    with col3:
+        heatpump = st.number_input("热泵技术节能量(kWh)", value=300, min_value=0)
+        st.session_state.carbon_offset_data["热泵技术"] = heatpump * 1.2
+    with col4:
+        sludge = st.number_input("污泥资源化量(kgDS)", value=200, min_value=0)
+        st.session_state.carbon_offset_data["污泥资源化"] = sludge * 0.3
 
-                total_offset = sum(st.session_state.carbon_offset_data.values())
-                st.metric("总碳抵消量", f"{total_offset:.2f} kgCO2eq")
+    total_offset = sum(st.session_state.carbon_offset_data.values())
+    st.metric("总碳抵消量", f"{total_offset:.2f} kgCO2eq")
 
-            # 技术适用性分析
-            st.subheader("技术适用性分析")
-            selected_tech = st.selectbox(
+    # 技术适用性分析
+    st.subheader("技术适用性分析")
+    selected_tech = st.selectbox(
                 "选择技术查看详情",
                 st.session_state.tech_comparison_data['技术名称'].tolist()
-            )
+    )
 
-            tech_details = st.session_state.tech_comparison_data[
+    tech_details = st.session_state.tech_comparison_data[
                 st.session_state.tech_comparison_data['技术名称'] == selected_tech
-                ].iloc[0]
+        ].iloc[0]
 
-            st.write(f"**{selected_tech}**")
-            st.write(f"- 预计年减排量: {tech_details['减排量_kgCO2eq']} kgCO2eq")
-            st.write(f"- 投资成本: {tech_details['投资成本_万元']} 万元")
-            st.write(f"- 投资回收期: {tech_details['回收期_年']} 年")
-            st.write(f"- 适用性: {tech_details['适用性']}")
-            st.write(f"- 碳减排贡献率: {tech_details['碳减排贡献率_%']}%")
-            st.write(f"- 能源中和率: {tech_details['能源中和率_%']}%")
+    st.write(f"**{selected_tech}**")
+    st.write(f"- 预计年减排量: {tech_details['减排量_kgCO2eq']} kgCO2eq")
+    st.write(f"- 投资成本: {tech_details['投资成本_万元']} 万元")
+    st.write(f"- 投资回收期: {tech_details['回收期_年']} 年")
+    st.write(f"- 适用性: {tech_details['适用性']}")
+    st.write(f"- 碳减排贡献率: {tech_details['碳减排贡献率_%']}%")
+    st.write(f"- 能源中和率: {tech_details['能源中和率_%']}%")
 
-            # 碳抵消计算
-            st.subheader("碳抵消计算")
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                biogas = st.number_input("沼气发电量(kWh)", value=1000, min_value=0)
-                st.session_state.carbon_offset_data["沼气发电"] = biogas * 2.5
-            with col2:
-                solar = st.number_input("光伏发电量(kWh)", value=500, min_value=0)
-                st.session_state.carbon_offset_data["光伏发电"] = solar * 0.85
-            with col3:
-                heatpump = st.number_input("热泵技术节能量(kWh)", value=300, min_value=0)
-                st.session_state.carbon_offset_data["热泵技术"] = heatpump * 1.2
-            with col4:
-                sludge = st.number_input("污泥资源化量(kgDS)", value=200, min_value=0)
-                st.session_state.carbon_offset_data["污泥资源化"] = sludge * 0.3
+    # 碳抵消计算
+    st.subheader("碳抵消计算")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        biogas = st.number_input("沼气发电量(kWh)", value=1000, min_value=0)
+        st.session_state.carbon_offset_data["沼气发电"] = biogas * 2.5
+    with col2:
+        solar = st.number_input("光伏发电量(kWh)", value=500, min_value=0)
+        st.session_state.carbon_offset_data["光伏发电"] = solar * 0.85
+    with col3:
+        heatpump = st.number_input("热泵技术节能量(kWh)", value=300, min_value=0)
+        st.session_state.carbon_offset_data["热泵技术"] = heatpump * 1.2
+    with col4:
+        sludge = st.number_input("污泥资源化量(kgDS)", value=200, min_value=0)
+        st.session_state.carbon_offset_data["污泥资源化"] = sludge * 0.3
 
-            total_offset = sum(st.session_state.carbon_offset_data.values())
-            st.metric("总碳抵消量", f"{total_offset:.2f} kgCO2eq")
+    total_offset = sum(st.session_state.carbon_offset_data.values())
+    st.metric("总碳抵消量", f"{total_offset:.2f} kgCO2eq")
 
 # 新增选项卡：因子库管理
-        with tab7:
-            st.header("碳排放因子库管理")
+with tab7:
+    st.header("碳排放因子库管理")
 
-            # 检查是否是回退模式
-            fallback_mode = hasattr(st.session_state.factor_db,
+    # 检查是否是回退模式
+    fallback_mode = hasattr(st.session_state.factor_db,
                                     'is_fallback') and st.session_state.factor_db.is_fallback
-            if fallback_mode:
-                st.warning("⚠️ 当前处于回退模式，使用默认因子值。某些功能可能受限。")
+    if fallback_mode:
+        st.warning("⚠️ 当前处于回退模式，使用默认因子值。某些功能可能受限。")
 
-            # 显示当前因子
-            st.subheader("当前碳排放因子（权威来源）")
+    # 显示当前因子
+    st.subheader("当前碳排放因子（权威来源）")
 
-            # 定义默认因子数据
-            default_factors_data = {
+    # 定义默认因子数据
+    default_factors_data = {
                 '因子类型': ['电力', 'PAC', 'PAM', 'N2O', 'CH4', '次氯酸钠', '臭氧', '沼气发电', '光伏发电', '热泵技术',
                              '污泥资源化'],
                 '因子值': [0.5366, 1.62, 1.5, 273, 27.9, 0.92, 0.8, 2.5, 0.85, 1.2, 0.3],
@@ -2339,88 +2339,88 @@ with tab5:
                 '描述': ['2021年全国电力平均二氧化碳排放因子', '聚合氯化铝排放因子', '聚丙烯酰胺排放因子',
                          '氧化亚氮全球变暖潜能值(GWP)', '甲烷全球变暖潜能值(GWP)', '次氯酸钠排放因子', '臭氧排放因子',
                          '沼气发电碳抵消因子', '光伏发电碳抵消因子', '热泵技术碳抵消因子', '污泥资源化碳抵消因子']
-            }
+    }
 
-            try:
-                # 尝试从数据库获取因子
-                if not fallback_mode:
-                    factors_df = st.session_state.factor_db.export_factors("temp_factors.csv", format="csv")
+    try:
+        # 尝试从数据库获取因子
+        if not fallback_mode:
+            factors_df = st.session_state.factor_db.export_factors("temp_factors.csv", format="csv")
+        else:
+            factors_df = pd.DataFrame()
+
+        if not factors_df.empty:
+            # 高亮显示关键因子
+            def highlight_key_factors(row):
+                if row['factor_type'] in ['电力', 'N2O', 'CH4']:
+                    return ['background-color: #e6f3ff'] * len(row)
                 else:
-                    factors_df = pd.DataFrame()
-
-                if not factors_df.empty:
-                    # 高亮显示关键因子
-                    def highlight_key_factors(row):
-                        if row['factor_type'] in ['电力', 'N2O', 'CH4']:
-                            return ['background-color: #e6f3ff'] * len(row)
-                        else:
-                            return [''] * len(row)
+                    return [''] * len(row)
 
 
-                    styled_df = factors_df.style.apply(highlight_key_factors, axis=1)
-                    st.dataframe(styled_df, height=400)
-                    st.caption("注：高亮因子来源于中国生态环境部官方文件或IPCC第六次评估报告(AR6)。")
-                else:
-                    # 显示默认数据
-                    if fallback_mode:
-                        st.info("📄 显示默认因子数据")
-                    else:
-                        st.warning("📊 因子数据库为空，显示默认因子数据")
-
-                    default_df = pd.DataFrame(default_factors_data)
-
-
-                    # 高亮显示关键因子
-                    def highlight_key_factors_default(row):
-                        if row['因子类型'] in ['电力', 'N2O', 'CH4']:
-                            return ['background-color: #e6f3ff'] * len(row)
-                        else:
-                            return [''] * len(row)
-
-
-                    styled_default_df = default_df.style.apply(highlight_key_factors_default, axis=1)
-                    st.dataframe(styled_default_df, height=400)
-                    st.caption("注：高亮因子来源于中国生态环境部官方文件或IPCC第六次评估报告(AR6)。")
-
-            except Exception as e:
-                st.error(f"获取因子数据失败: {e}")
-                # 显示备用数据
-                st.info("📄 显示备用因子数据")
-                default_df = pd.DataFrame(default_factors_data)
-                st.dataframe(default_df, height=400)
-
-            # 因子更新界面
-            st.subheader("更新碳排放因子")
-
-            # 在回退模式下禁用更新功能
+            styled_df = factors_df.style.apply(highlight_key_factors, axis=1)
+            st.dataframe(styled_df, height=400)
+            st.caption("注：高亮因子来源于中国生态环境部官方文件或IPCC第六次评估报告(AR6)。")
+        else:
+            # 显示默认数据
             if fallback_mode:
-                st.info("🔒 回退模式下无法更新因子。请检查数据库连接。")
-
-                # 显示模拟的更新界面（仅供演示）
-                st.markdown("**演示模式 - 因子更新界面**")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    factor_type = st.selectbox("因子类型", ["电力", "PAC", "PAM", "次氯酸钠", "臭氧", "N2O", "CH4"])
-                with col2:
-                    factor_value = st.number_input("因子值", value=0.0, step=0.01)
-                with col3:
-                    factor_year = st.selectbox("生效年份", list(range(2020, 2026)))
-
-                if st.button("更新因子（演示）"):
-                    st.info(f"📝 演示模式：将更新{factor_type} {factor_year}年排放因子为: {factor_value}")
+                st.info("📄 显示默认因子数据")
             else:
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    factor_type = st.selectbox("因子类型", ["电力", "PAC", "PAM", "次氯酸钠", "臭氧", "N2O", "CH4"])
-                with col2:
-                    factor_value = st.number_input("因子值", value=0.0, step=0.01)
-                with col3:
-                    factor_year = st.selectbox("生效年份", list(range(2020, 2026)))
+                st.warning("📊 因子数据库为空，显示默认因子数据")
 
-                if st.button("更新因子"):
-                    try:
-                        # 根据因子类型确定单位
-                        unit_mapping = {
+            default_df = pd.DataFrame(default_factors_data)
+
+
+            # 高亮显示关键因子
+            def highlight_key_factors_default(row):
+                if row['因子类型'] in ['电力', 'N2O', 'CH4']:
+                    return ['background-color: #e6f3ff'] * len(row)
+                else:
+                    return [''] * len(row)
+
+
+            styled_default_df = default_df.style.apply(highlight_key_factors_default, axis=1)
+            st.dataframe(styled_default_df, height=400)
+            st.caption("注：高亮因子来源于中国生态环境部官方文件或IPCC第六次评估报告(AR6)。")
+
+    except Exception as e:
+        st.error(f"获取因子数据失败: {e}")
+        # 显示备用数据
+        st.info("📄 显示备用因子数据")
+        default_df = pd.DataFrame(default_factors_data)
+        st.dataframe(default_df, height=400)
+
+    # 因子更新界面
+    st.subheader("更新碳排放因子")
+
+    # 在回退模式下禁用更新功能
+    if fallback_mode:
+        st.info("🔒 回退模式下无法更新因子。请检查数据库连接。")
+
+        # 显示模拟的更新界面（仅供演示）
+        st.markdown("**演示模式 - 因子更新界面**")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            factor_type = st.selectbox("因子类型", ["电力", "PAC", "PAM", "次氯酸钠", "臭氧", "N2O", "CH4"])
+        with col2:
+            factor_value = st.number_input("因子值", value=0.0, step=0.01)
+        with col3:
+            factor_year = st.selectbox("生效年份", list(range(2020, 2026)))
+
+        if st.button("更新因子（演示）"):
+            st.info(f"📝 演示模式：将更新{factor_type} {factor_year}年排放因子为: {factor_value}")
+    else:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            factor_type = st.selectbox("因子类型", ["电力", "PAC", "PAM", "次氯酸钠", "臭氧", "N2O", "CH4"])
+        with col2:
+            factor_value = st.number_input("因子值", value=0.0, step=0.01)
+        with col3:
+            factor_year = st.selectbox("生效年份", list(range(2020, 2026)))
+
+        if st.button("更新因子"):
+            try:
+                # 根据因子类型确定单位
+                unit_mapping = {
                             "电力": "kgCO2/kWh",
                             "PAC": "kgCO2/kg",
                             "PAM": "kgCO2/kg",
@@ -2428,21 +2428,21 @@ with tab5:
                             "臭氧": "kgCO2/kg",
                             "N2O": "kgCO2/kgN2O",
                             "CH4": "kgCO2/kgCH4"
-                        }
-                        unit = unit_mapping.get(factor_type, "kgCO2/kg")
+                }
+                unit = unit_mapping.get(factor_type, "kgCO2/kg")
 
-                        st.session_state.factor_db.update_factor(
+                st.session_state.factor_db.update_factor(
                             factor_type, factor_value, unit, "中国",
                             f"{factor_year}-01-01", f"{factor_year}-12-31",
                             "用户更新", f"{factor_year}年{factor_type}排放因子", "手动更新"
-                        )
-                        st.success(f"✅ 已更新{factor_type} {factor_year}年排放因子: {factor_value} {unit}")
+                )
+                st.success(f"✅ 已更新{factor_type} {factor_year}年排放因子: {factor_value} {unit}")
 
-                        # 刷新页面显示
-                        st.experimental_rerun()
+                # 刷新页面显示
+                st.experimental_rerun()
 
-                    except Exception as e:
-                        st.error(f"❌ 更新因子失败: {e}")
+            except Exception as e:
+                st.error(f"❌ 更新因子失败: {e}")
 
             # 因子历史趋势
             st.subheader("电力排放因子历史趋势")
