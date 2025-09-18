@@ -1805,8 +1805,16 @@ with tab5:
 
                 # 计算并显示变化趋势
                 if not st.session_state.historical_data.empty and 'total_CO2eq' in st.session_state.historical_data.columns:
-                    # 历史数据是日数据，直接求平均
-                    current_avg_daily = st.session_state.historical_data['total_CO2eq'].mean()
+                    # 使用最近30天的数据计算当前平均值（与预测使用的数据范围一致）
+                    historical_data = st.session_state.historical_data.copy()
+                    historical_data['日期'] = pd.to_datetime(historical_data['日期'])
+
+                    # 获取最近30天的数据
+                    recent_data = historical_data.tail(30)
+                    if len(recent_data) > 0:
+                        current_avg_daily = recent_data['total_CO2eq'].mean()
+                    else:
+                        current_avg_daily = historical_data['total_CO2eq'].mean()
 
                     # 预测数据是月度的，需要转换为日平均值（假设每月30天）
                     days_in_month = 30
@@ -1814,6 +1822,9 @@ with tab5:
 
                     change = ((
                                           avg_prediction_daily - current_avg_daily) / current_avg_daily * 100) if current_avg_daily > 0 else 0
+
+                    # 存储change值供后续使用
+                    st.session_state.change_percent = change
 
                     col1, col2, col3 = st.columns(3)
                     with col1:
@@ -1827,30 +1838,16 @@ with tab5:
                         st.metric("变化趋势", f"{change:+.1f}%",
                                   delta_color="inverse" if change > 0 else "normal")
 
-        # 添加前瞻性指导建议
-        st.subheader("前瞻性运行指导建议")
+            # 添加前瞻性指导建议
+            st.subheader("前瞻性运行指导建议")
 
-        if not st.session_state.prediction_data.empty and not st.session_state.historical_data.empty:
-            # 使用历史数据的最近一年与预测数据进行比较
-            historical_data = st.session_state.historical_data.copy()
-            historical_data['日期'] = pd.to_datetime(historical_data['日期'])
+            if not st.session_state.prediction_data.empty and not st.session_state.historical_data.empty:
+                # 直接使用前面计算的变化百分比
+                change_percent = st.session_state.get('change_percent', 0)
+                trend = "上升" if change_percent > 0 else "下降"
 
-            # 获取最近一年的数据
-            latest_year = historical_data['日期'].dt.year.max()
-            recent_data = historical_data[historical_data['日期'].dt.year == latest_year]
-
-            if len(recent_data) > 0:
-                current_avg_daily = recent_data['total_CO2eq'].mean()
-            else:
-                current_avg_daily = historical_data['total_CO2eq'].mean()
-
-            # 预测数据是月度的，需要转换为日平均值（假设每月30天）
-            days_in_month = 30
-            predicted_avg_daily = st.session_state.prediction_data['predicted_CO2eq'].mean() / days_in_month
-
-            trend = "上升" if predicted_avg_daily > current_avg_daily else "下降"
-            change_percent = abs(
-                (predicted_avg_daily - current_avg_daily) / current_avg_daily * 100) if current_avg_daily > 0 else 0
+                # 分析趋势强度
+                trend_strength = "显著" if abs(change_percent) > 15 else "轻微" if abs(change_percent) > 5 else "平稳"
 
             # 分析趋势强度
             trend_strength = "显著" if change_percent > 15 else "轻微" if change_percent > 5 else "平稳"
