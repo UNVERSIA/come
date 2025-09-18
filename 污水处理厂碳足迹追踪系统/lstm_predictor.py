@@ -543,6 +543,22 @@ class CarbonLSTMPredictor:
             df = calculator.calculate_indirect_emissions(df)
             df = calculator.calculate_unit_emissions(df)
 
+
+        # 确保所有必需的特征列都存在
+        for col in self.feature_columns:
+            if col not in df.columns:
+                # 使用典型默认值填充缺失特征
+                default_value = self._get_default_value(col)
+                df[col] = default_value
+                print(f"警告: 特征列 '{col}' 不存在，使用默认值 {default_value}")
+
+        # 确保没有NaN值
+        df = df.fillna(0)
+
+        # 确保所有数值都是正数
+        for col in df.select_dtypes(include=[np.number]).columns:
+            df[col] = df[col].abs()
+
         # 准备特征数据 - 使用最后30天数据
         if len(df) < self.sequence_length:
             # 如果数据不足，使用所有可用数据并填充
