@@ -17,3 +17,11 @@ gatherUsageStats = false
 headless = true
 enableCORS = false
 enableXsrfProtection = true
+
+[global]
+# 禁用文件监控以避免 inotify 限制问题
+developmentMode = false
+
+[runner]
+# 禁用自动重新运行
+fastReruns = false
