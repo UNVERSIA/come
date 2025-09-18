@@ -472,29 +472,69 @@ class CarbonCalculator:
         """比较不同减排技术的效果"""
         results = []
 
-        # 修改列名以匹配可视化函数
-        tech_data = {
-            '厌氧消化产沼': {
-                '减排量_kgCO2eq': 15000, '投资成本_万元': 500, '回收期_年': 5,
-                '适用性': '高', '碳减排贡献率_%': 25, '能源中和率_%': 30
-            },
-            '光伏发电': {
-                '减排量_kgCO2eq': 8000, '投资成本_万元': 300, '回收期_年': 8,
-                '适用性': '中', '碳减排贡献率_%': 15, '能源中和率_%': 40
-            },
-            '高效曝气': {
-                '减排量_kgCO2eq': 6000, '投资成本_万元': 200, '回收期_年': 4,
-                '适用性': '高', '碳减排贡献率_%': 20, '能源中和率_%': 10
-            },
-            '热泵技术': {
-                '减排量_kgCO2eq': 4500, '投资成本_万元': 150, '回收期_年': 6,
-                '适用性': '中', '碳减排贡献率_%': 12, '能源中和率_%': 15
-            },
-            '污泥干化': {
-                '减排量_kgCO2eq': 3000, '投资成本_万元': 100, '回收期_年': 7,
-                '适用性': '低', '碳减排贡献率_%': 8, '能源中和率_%': 5
+        # 计算基准排放
+        if df is not None and not df.empty:
+            df_calc = self.calculate_direct_emissions(df)
+            df_calc = self.calculate_indirect_emissions(df_calc)
+            df_calc = self.calculate_unit_emissions(df_calc)
+
+            baseline_emission = df_calc['total_CO2eq'].sum()
+            total_water = df_calc['处理水量(m³)'].sum()
+            total_energy = df_calc['电耗(kWh)'].sum()
+
+            # 基于实际数据的技术效果计算
+            tech_calculations = {
+                    '厌氧消化产沼': {
+                        'reduction_rate': 0.20,  # 20%减排
+                        'investment_per_m3': 50,  # 50元/m³投资成本
+                        'payback_years': 6,
+                        'applicability': '高'
+                    },
+                    '光伏发电': {
+                        'reduction_rate': 0.15,  # 15%减排（抵消电力碳排放）
+                        'investment_per_m3': 30,
+                        'payback_years': 8,
+                        'applicability': '中'
+                    },
+                    '高效曝气': {
+                        'reduction_rate': 0.12,  # 12%减排
+                        'investment_per_m3': 20,
+                        'payback_years': 4,
+                        'applicability': '高'
+                    },
+                    '热泵技术': {
+                        'reduction_rate': 0.08,  # 8%减排
+                        'investment_per_m3': 15,
+                        'payback_years': 6,
+                        'applicability': '中'
+                    },
+                    '污泥干化': {
+                        'reduction_rate': 0.05,  # 5%减排
+                        'investment_per_m3': 10,
+                        'payback_years': 7,
+                        'applicability': '低'
+                    }
             }
-        }
+
+            for tech in tech_list:
+                if tech in tech_calculations:
+                    calc = tech_calculations[tech]
+                    reduction_amount = baseline_emission * calc['reduction_rate']
+                    investment_cost = total_water * calc['investment_per_m3'] / 10000  # 万元
+
+                    results.append({
+                            '技术名称': tech,
+                            '减排量_kgCO2eq': reduction_amount,
+                            '投资成本_万元': investment_cost,
+                            '回收期_年': calc['payback_years'],
+                            '适用性': calc['applicability'],
+                            '碳减排贡献率_%': calc['reduction_rate'] * 100,
+                            '能源中和率_%': min(50, calc['reduction_rate'] * 150)  # 基于减排率估算能源中和率
+                    })
+        else:
+             # 如果没有数据，返回空结果
+            return pd.DataFrame()
+
 
         # 如果有实际数据，基于数据计算
         if df is not None:
