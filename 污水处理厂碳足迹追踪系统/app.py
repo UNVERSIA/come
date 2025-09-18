@@ -1313,6 +1313,7 @@ with tab4:
                 current_total = df_calc['total_CO2eq'].sum() / current_water
             else:
                 current_total = 0
+
             if historical_mean > 0 and current_total > 1.5 * historical_mean:
                 st.warning(f"⚠️ 异常预警：当月单位水量碳排放（{current_total:.4f} kgCO2eq/m³）超历史均值50%！")
                 # 识别主要问题区域（包含除臭系统）
@@ -1326,6 +1327,7 @@ with tab4:
                 }
                 max_unit = max(unit_emissions, key=unit_emissions.get)
                 st.error(f"主要问题区域: {max_unit} (排放强度: {unit_emissions[max_unit]:.4f} kgCO2eq/m³)")
+
                 # 针对性建议
                 if max_unit == "生物处理区":
                     st.info("优化建议：")
@@ -1371,16 +1373,25 @@ with tab4:
                 effective_pac_adjust = pac_adjust
                 effective_sludge_ratio = sludge_ratio
 
-            optimized_bio = df_calc['bio_CO2eq'].sum() * (1 - effective_aeration_adjust / 100)
-            optimized_depth = df_calc['depth_CO2eq'].sum() * (1 - effective_pac_adjust / 100)
+            # 修正优化逻辑：负值表示减少，正值表示增加
+            # 曝气调整对生物处理区排放的影响（曝气减少15%，排放减少约12%）
+            aeration_efficiency_factor = 1 + effective_aeration_adjust / 100 * 0.8  # 0.8是效率系数
+            optimized_bio = df_calc['bio_CO2eq'].sum() * aeration_efficiency_factor
+
+            # PAC调整对深度处理区排放的影响（PAC减少10%，排放减少8%）
+            pac_efficiency_factor = 1 + effective_pac_adjust / 100 * 0.8  # 0.8是效率系数
+            optimized_depth = df_calc['depth_CO2eq'].sum() * pac_efficiency_factor
 
             # 污泥回流比优化影响生物处理效率
-            sludge_optimization_factor = min(1.1, 1 + (effective_sludge_ratio - 0.5) * 0.2)  # 回流比提高时减少5-10%排放
-            optimized_bio = optimized_bio / sludge_optimization_factor
+            if effective_sludge_ratio > 0.5:
+                sludge_optimization_factor = 1 - (effective_sludge_ratio - 0.5) * 0.2  # 回流比提高时减少排放
+            else:
+                sludge_optimization_factor = 1 + (0.5 - effective_sludge_ratio) * 0.3  # 回流比降低时增加排放
+            optimized_bio = optimized_bio * sludge_optimization_factor
 
             optimized_total = (df_calc['total_CO2eq'].sum()
-                               - (df_calc['bio_CO2eq'].sum() - optimized_bio)
-                               - (df_calc['depth_CO2eq'].sum() - optimized_depth))
+                               - df_calc['bio_CO2eq'].sum() + optimized_bio
+                               - df_calc['depth_CO2eq'].sum() + optimized_depth)
 
             # 创建优化效果图表 - 所有文字改为黑色
             opt_fig = go.Figure()
@@ -2201,16 +2212,40 @@ with tab5:
             st.subheader("当前碳排放因子（权威来源）")
             try:
                 factors_df = st.session_state.factor_db.export_factors("temp_factors.csv", format="csv")
-                # 高亮显示关键因子
-                styled_df = factors_df.style.apply(
-                    lambda x: ['background-color: #e6f3ff' if x['factor_type'] in ['电力', 'N2O', 'CH4'] else '' for i
-                               in x],
-                    axis=1
-                )
-                st.dataframe(styled_df, height=300)
-                st.caption("注：高亮因子来源于中国生态环境部官方文件或IPCC第六次评估报告(AR6)。")
+                if not factors_df.empty:
+                    # 高亮显示关键因子
+                    def highlight_key_factors(row):
+                        if row['factor_type'] in ['电力', 'N2O', 'CH4']:
+                            return ['background-color: #e6f3ff'] * len(row)
+                        else:
+                            return [''] * len(row)
+
+
+                    styled_df = factors_df.style.apply(highlight_key_factors, axis=1)
+                    st.dataframe(styled_df, height=300)
+                    st.caption("注：高亮因子来源于中国生态环境部官方文件或IPCC第六次评估报告(AR6)。")
+                else:
+                    # 如果数据为空，显示默认数据
+                    st.warning("因子数据库为空，显示默认因子数据")
+                    default_data = {
+                        '因子类型': ['电力', 'PAC', 'PAM', 'N2O', 'CH4'],
+                        '因子值': [0.5366, 1.62, 1.5, 273, 27.9],
+                        '单位': ['kgCO2/kWh', 'kgCO2/kg', 'kgCO2/kg', 'kgCO2/kgN2O', 'kgCO2/kgCH4'],
+                        '数据来源': ['生态环境部', 'T/CAEPI 49-2022', 'T/CAEPI 49-2022', 'IPCC AR6', 'IPCC AR6']
+                    }
+                    default_df = pd.DataFrame(default_data)
+                    st.dataframe(default_df, height=300)
             except Exception as e:
                 st.error(f"获取因子数据失败: {e}")
+                # 显示备用数据
+                default_data = {
+                    '因子类型': ['电力', 'PAC', 'PAM', 'N2O', 'CH4'],
+                    '因子值': [0.5366, 1.62, 1.5, 273, 27.9],
+                    '单位': ['kgCO2/kWh', 'kgCO2/kg', 'kgCO2/kg', 'kgCO2/kgN2O', 'kgCO2/kgCH4'],
+                    '数据来源': ['生态环境部', 'T/CAEPI 49-2022', 'T/CAEPI 49-2022', 'IPCC AR6', 'IPCC AR6']
+                }
+                default_df = pd.DataFrame(default_data)
+                st.dataframe(default_df, height=300)
 
             # 因子更新界面
             st.subheader("更新碳排放因子")
