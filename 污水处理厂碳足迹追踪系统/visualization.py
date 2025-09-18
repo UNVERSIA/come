@@ -984,3 +984,128 @@ def create_training_history_chart(history):
     )
 
     return fig
+
+
+def create_technology_comparison(tech_data):
+    """创建碳减排技术对比图"""
+    if tech_data is None or tech_data.empty:
+        return go.Figure()
+
+    fig = go.Figure()
+
+    # 添加减排量柱状图
+    fig.add_trace(go.Bar(
+        x=tech_data['技术名称'],
+        y=tech_data['减排量_kgCO2eq'],
+        name='减排量',
+        marker_color='#2ca02c',
+        text=tech_data['减排量_kgCO2eq'],
+        textposition='auto',
+        texttemplate='%{text:.0f}',
+        textfont=dict(color='black')
+    ))
+
+    # 添加投资成本线图
+    fig.add_trace(go.Scatter(
+        x=tech_data['技术名称'],
+        y=tech_data['投资成本_万元'],
+        name='投资成本',
+        mode='lines+markers',
+        marker=dict(color='#d62728', size=8),
+        line=dict(color='#d62728', width=3),
+        yaxis='y2',
+        text=tech_data['投资成本_万元'],
+        textposition='top center',
+        texttemplate='%{text:.0f}万',
+        textfont=dict(color='black')
+    ))
+
+    # 更新布局
+    fig.update_layout(
+        title="碳减排技术对比分析",
+        title_font=dict(size=24, family="Arial", color="black"),
+        xaxis_title="减排技术",
+        yaxis_title="减排量 (kgCO2eq)",
+        font=dict(size=14, color="black"),
+        plot_bgcolor="rgba(245, 245, 245, 1)",
+        paper_bgcolor="rgba(245, 245, 245, 1)",
+        height=500,
+        xaxis=dict(
+            tickfont=dict(color="black"),
+            title_font=dict(color="black"),
+            tickangle=45
+        ),
+        yaxis=dict(
+            tickfont=dict(color="black"),
+            title_font=dict(color="black"),
+            title="减排量 (kgCO2eq)"
+        ),
+        yaxis2=dict(
+            tickfont=dict(color="black"),
+            title_font=dict(color="black"),
+            title="投资成本 (万元)",
+            overlaying='y',
+            side='right'
+        ),
+        legend=dict(
+            x=0.02,
+            y=0.98,
+            font=dict(color='black')
+        )
+    )
+
+    return fig
+
+
+def create_factor_trend_chart(factor_history):
+    """创建因子历史趋势图"""
+    if factor_history is None or factor_history.empty:
+        return go.Figure()
+
+    fig = go.Figure()
+
+    # 按因子类型分组绘制趋势线
+    factor_types = factor_history['factor_type'].unique()
+    colors = px.colors.qualitative.Set1
+
+    for i, factor_type in enumerate(factor_types):
+        factor_data = factor_history[factor_history['factor_type'] == factor_type]
+        factor_data = factor_data.sort_values('effective_date')
+
+        fig.add_trace(go.Scatter(
+            x=pd.to_datetime(factor_data['effective_date']),
+            y=factor_data['factor_value'],
+            mode='lines+markers',
+            name=factor_type,
+            line=dict(color=colors[i % len(colors)], width=3),
+            marker=dict(size=6),
+            hovertemplate='<b>%{fullData.name}</b><br>' +
+                          '日期: %{x}<br>' +
+                          '因子值: %{y}<br>' +
+                          '<extra></extra>'
+        ))
+
+    fig.update_layout(
+        title="碳排放因子历史趋势",
+        title_font=dict(size=24, family="Arial", color="black"),
+        xaxis_title="生效日期",
+        yaxis_title="排放因子值",
+        font=dict(size=14, color="black"),
+        plot_bgcolor="rgba(245, 245, 245, 1)",
+        paper_bgcolor="rgba(245, 245, 245, 1)",
+        height=500,
+        xaxis=dict(
+            tickfont=dict(color="black"),
+            title_font=dict(color="black")
+        ),
+        yaxis=dict(
+            tickfont=dict(color="black"),
+            title_font=dict(color="black")
+        ),
+        legend=dict(
+            font=dict(color='black')
+        ),
+        hovermode='closest'
+    )
+
+    return fig
