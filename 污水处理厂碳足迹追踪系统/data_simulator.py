@@ -1,9 +1,7 @@
 import os
-
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-
 from carbon_calculator import CarbonCalculator
 
 
@@ -11,6 +9,35 @@ class DataSimulator:
     def __init__(self):
         self.start_date = datetime(2018, 1, 1)
         self.end_date = datetime(2024, 12, 31)
+
+    def _create_monthly_data(self, daily_df):
+        """将日度数据聚合为月度数据"""
+        df = daily_df.copy()
+        df['日期'] = pd.to_datetime(df['日期'])
+
+        # 设置日期为索引
+        df.set_index('日期', inplace=True)
+
+        # 按月聚合 - 使用平均值更适合预测
+        monthly_df = df.resample('M').agg({
+            '处理水量(m³)': 'mean',
+            '电耗(kWh)': 'mean',
+            'PAC投加量(kg)': 'mean',
+            'PAM投加量(kg)': 'mean',
+            '次氯酸钠投加量(kg)': 'mean',
+            '进水COD(mg/L)': 'mean',
+            '出水COD(mg/L)': 'mean',
+            '进水TN(mg/L)': 'mean',
+            '出水TN(mg/L)': 'mean',
+            'total_CO2eq': 'mean',
+            '自来水(m³/d)': 'mean',
+            '脱水污泥外运量(80%)': 'mean'
+        }).reset_index()
+
+        # 添加年月标识列
+        monthly_df['年月'] = monthly_df['日期'].dt.strftime('%Y年%m月')
+
+        return monthly_df
 
     def generate_seasonal_pattern(self, length, amplitude, phase=0):
         """生成季节性模式"""
@@ -141,12 +168,19 @@ class DataSimulator:
             # 如果计算失败，添加一个默认的total_CO2eq列
             df['total_CO2eq'] = df['电耗(kWh)'] * 0.5 + df['处理水量(m³)'] * 0.1
 
+        # 新增：创建月度聚合数据
+        df_monthly = self._create_monthly_data(df)
+
         # 保存到文件
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         df.to_csv(save_path, index=False, encoding='utf-8')
+        df_monthly.to_csv(save_path.replace('.csv', '_monthly.csv'), index=False, encoding='utf-8')
+
         print(f"模拟数据已生成并保存到 {save_path}，共 {len(df)} 条记录")
+        print(f"月度数据已生成并保存到 {save_path.replace('.csv', '_monthly.csv')}，共 {len(df_monthly)} 条记录")
 
         return df
+
 
 # 使用示例
 if __name__ == "__main__":
