@@ -32,33 +32,8 @@ except ImportError as e:
     st.info("请确保所有依赖文件都在同一目录下")
     st.stop()
 
-# 页面配置 - 强制使用浅色模式
-st.set_page_config(
-    page_title="污水处理厂碳足迹追踪系统",
-    layout="wide",
-    page_icon="🌍",
-    initial_sidebar_state="expanded"
-)
-
-# 添加CSS强制浅色模式
-st.markdown(
-    """
-    <style>
-    .stApp {
-        background-color: white;
-        color: black;
-    }
-    .css-1d391kg, .css-1v0mbdj, .css-1v0mbdj edgvbvh1, .css-1v0mbdj edgvbvh3 {
-        background-color: white !important;
-        color: black !important;
-    }
-    .css-1v0mbdj edgvbvh5 {
-        color: black !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+# 页面配置
+st.set_page_config(page_title="污水处理厂碳足迹追踪系统", layout="wide", page_icon="🌍")
 st.title("基于碳核算-碳账户模型的污水处理厂碳足迹追踪与评估系统")
 st.markdown("### 第七届全国大学生市政环境AI＋创新实践能力大赛-产业赛道项目")
 
