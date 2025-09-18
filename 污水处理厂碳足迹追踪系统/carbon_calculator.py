@@ -351,9 +351,26 @@ class CarbonCalculator:
             # 创建模拟数据
             dates = [datetime.now() - timedelta(days=i) for i in range(30, 0, -1)]
             df = pd.DataFrame({
-                '日期': dates,
-                'total_CO2eq': [1000 + np.random.normal(0, 100) for _ in range(30)]  # 添加随机变化
+                    '日期': dates,
+                    'total_CO2eq': [1000 + np.random.normal(0, 100) for _ in range(30)]  # 添加随机变化
             })
+
+        # 确保有日期列和碳排放列
+        if '日期' not in df.columns:
+            df['日期'] = pd.date_range(end=datetime.now(), periods=len(df), freq='D')
+
+        if 'total_CO2eq' not in df.columns:
+            # 计算碳排放
+            df = self.calculate_direct_emissions(df)
+            df = self.calculate_indirect_emissions(df)
+            df = self.calculate_unit_emissions(df)
+
+        # 确保没有NaN值
+        df = df.fillna(0)
+
+        # 确保所有数值都是正数
+        for col in df.select_dtypes(include=[np.number]).columns:
+            df[col] = df[col].abs()
 
         # 确保有日期列和碳排放列
         if '日期' not in df.columns:
