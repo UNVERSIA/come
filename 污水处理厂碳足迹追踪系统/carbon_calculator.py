@@ -39,25 +39,22 @@ class CarbonCalculator:
         except ValueError:
             self.f_e = 0.5568  # 默认值
 
-            # N2O排放因子 - 基于IPCC 2019年精细指南
-            self.EF_N2O = 0.016  # kgN2O-N/kgN处理，适用于活性污泥法
-            self.C_N2O_N2 = 44 / 28  # N2O与N2的分子量比
+        # 其他固定因子
+        self.EF_N2O = 0.016
+        self.C_N2O_N2 = 44 / 28
 
-            try:
-                self.f_N2O = self.factor_db.get_factor("N2O", "通用")
-            except ValueError:
-                self.f_N2O = 273  # IPCC AR6 GWP值
+        try:
+            self.f_N2O = self.factor_db.get_factor("N2O", "通用")
+        except ValueError:
+            self.f_N2O = 273
 
-            # CH4排放参数 - 基于IPCC 2006年国家温室气体清单指南
-            self.B0 = 0.25  # 最大产甲烷能力 kgCH4/kgCOD
-            # 修正MCF值：厌氧处理系统应为0.1-0.3，好氧处理接近0
-            self.MCF_anaerobic = 0.15  # 厌氧池甲烷修正因子
-            self.MCF_aerobic = 0.001  # 好氧池甲烷修正因子
+        self.B0 = 0.25
+        self.MCF = 0.003
 
-            try:
-                self.f_CH4 = self.factor_db.get_factor("CH4", "通用")
-            except ValueError:
-                self.f_CH4 = 27.9  # IPCC AR6 GWP值
+        try:
+            self.f_CH4 = self.factor_db.get_factor("CH4", "通用")
+        except ValueError:
+            self.f_CH4 = 27.9
 
         # 药剂排放因子
         self.EF_chemicals = {
@@ -75,57 +72,15 @@ class CarbonCalculator:
             "污泥资源化": self.factor_db.get_factor("污泥资源化", "通用")
         }
 
-        # 各工艺单元能耗分配 - 基于典型污水处理厂运行数据动态计算
-        # 这些比例将根据实际工艺参数动态调整
-        self.base_energy_distribution = {
-            "预处理区": {"base_ratio": 0.15, "factor": 0.1},  # 基础比例15%，可调节±10%
-            "生物处理区": {"base_ratio": 0.50, "factor": 0.15},  # 基础比例50%，可调节±15%
-            "深度处理区": {"base_ratio": 0.20, "factor": 0.08},  # 基础比例20%，可调节±8%
-            "污泥处理区": {"base_ratio": 0.08, "factor": 0.03},  # 基础比例8%，可调节±3%
-            "出水区": {"base_ratio": 0.05, "factor": 0.02},  # 基础比例5%，可调节±2%
-            "除臭系统": {"base_ratio": 0.02, "factor": 0.01}  # 基础比例2%，可调节±1%
+        # 各工艺单元能耗分配比例
+        self.energy_distribution = {
+            "预处理区": 0.3193,
+            "生物处理区": 0.4453,
+            "深度处理区": 0.1155,
+            "泥处理区": 0.0507,
+            "出水区": 0.0672,
+            "除臭系统": 0.0267
         }
-
-    def calculate_dynamic_energy_distribution(self, df):
-        """基于实际工艺参数动态计算能耗分配比例"""
-        # 基于进水水质调整生物处理区能耗比例
-        avg_cod_in = df.get('进水COD(mg/L)', pd.Series([200])).mean()
-        avg_tn_in = df.get('进水TN(mg/L)', pd.Series([40])).mean()
-
-        # COD浓度影响系数：COD越高，生物处理能耗占比越大
-        cod_factor = 1 + (avg_cod_in - 200) / 1000  # 标准COD 200mg/L为基准
-        cod_factor = max(0.8, min(1.3, cod_factor))  # 限制在0.8-1.3之间
-
-        # TN浓度影响系数
-        tn_factor = 1 + (avg_tn_in - 40) / 200  # 标准TN 40mg/L为基准
-        tn_factor = max(0.8, min(1.2, tn_factor))  # 限制在0.8-1.2之间
-
-        # 动态调整各单元比例
-        bio_adjustment = (cod_factor + tn_factor - 2) * 0.1  # 综合调整因子
-
-        energy_distribution = {}
-        total_adjustment = 0
-
-        for unit, params in self.base_energy_distribution.items():
-            if unit == "生物处理区":
-                adjustment = bio_adjustment
-            elif unit == "深度处理区":
-                # 进水污染物浓度高时，深度处理负荷相对减少
-                adjustment = -bio_adjustment * 0.3
-            else:
-                adjustment = 0
-
-            # 确保调整在允许范围内
-            adjustment = max(-params["factor"], min(params["factor"], adjustment))
-            energy_distribution[unit] = params["base_ratio"] + adjustment
-            total_adjustment += adjustment
-
-        # 归一化确保总和为1
-        total = sum(energy_distribution.values())
-        for unit in energy_distribution:
-            energy_distribution[unit] /= total
-
-        return energy_distribution
 
 
         # 碳汇和减排技术因子
@@ -169,21 +124,12 @@ class CarbonCalculator:
 
         df['N2O_CO2eq'] = df['N2O_emission'] * self.f_N2O
 
-        # CH4直接排放 - 区分厌氧和好氧处理过程
+        # CH4直接排放 - 确保非负
         df['COD_removed'] = np.maximum(0, (
                 df['处理水量(m³)'] * np.abs(df['进水COD(mg/L)'] - df['出水COD(mg/L)']) / 1000
         ))
 
-        # 分别计算厌氧和好氧过程的CH4排放
-        # 假设30%的COD在厌氧池去除，70%在好氧池去除（基于典型A2O工艺）
-        anaerobic_cod_removed = df['COD_removed'] * 0.3  # 厌氧池COD去除量
-        aerobic_cod_removed = df['COD_removed'] * 0.7  # 好氧池COD去除量
-
-        # 分别计算CH4排放
-        ch4_anaerobic = anaerobic_cod_removed * self.B0 * self.MCF_anaerobic
-        ch4_aerobic = aerobic_cod_removed * self.B0 * self.MCF_aerobic
-
-        df['CH4_emission'] = np.maximum(0, ch4_anaerobic + ch4_aerobic)
+        df['CH4_emission'] = np.maximum(0, df['COD_removed'] * self.B0 * self.MCF)
         df['CH4_CO2eq'] = df['CH4_emission'] * self.f_CH4
 
         return df
@@ -241,7 +187,7 @@ class CarbonCalculator:
         return offset_data
 
     def calculate_unit_emissions(self, df):
-        """按工艺单元拆分排放量 - 使用动态能耗分配"""
+        """按工艺单元拆分排放量"""
         required_cols = ['energy_CO2eq', 'N2O_CO2eq', 'CH4_CO2eq', 'chemicals_CO2eq', '处理水量(m³)']
         missing_cols = [col for col in required_cols if col not in df.columns]
         if missing_cols:
@@ -250,23 +196,23 @@ class CarbonCalculator:
         # 处理缺失值
         df = df.fillna(0)
 
-        # 动态计算能耗分配比例
-        energy_distribution = self.calculate_dynamic_energy_distribution(df)
+        # 按工艺单元分配碳排放
+        df['pre_CO2eq'] = df['energy_CO2eq'] * self.energy_distribution["预处理区"]
+        df['bio_CO2eq'] = df['N2O_CO2eq'] + df['CH4_CO2eq'] + df['energy_CO2eq'] * self.energy_distribution[
+            "生物处理区"]
+        df['depth_CO2eq'] = df['chemicals_CO2eq'] + df['energy_CO2eq'] * self.energy_distribution["深度处理区"]
+        df['sludge_CO2eq'] = df['energy_CO2eq'] * self.energy_distribution["泥处理区"]
+        df['effluent_CO2eq'] = df['energy_CO2eq'] * self.energy_distribution["出水区"]
+        df['deodorization_CO2eq'] = df['energy_CO2eq'] * self.energy_distribution["除臭系统"]
 
-        # 按工艺单元分配碳排放 - 使用动态比例
-        df['pre_CO2eq'] = df['energy_CO2eq'] * energy_distribution["预处理区"]
+        # 总排放与效率
+        df['total_CO2eq'] = (
+                df['pre_CO2eq'] + df['bio_CO2eq'] + df['depth_CO2eq'] +
+                df['sludge_CO2eq'] + df['effluent_CO2eq'] + df['deodorization_CO2eq']
+        )
+        df['carbon_efficiency'] = df['处理水量(m³)'] / df['total_CO2eq'].replace(0, 1)
 
-        # 生物处理区包含N2O和CH4的直接排放
-        df['bio_CO2eq'] = (df['N2O_CO2eq'] + df['CH4_CO2eq'] +
-                           df['energy_CO2eq'] * energy_distribution["生物处理区"])
-
-        # 深度处理区主要是化学药剂排放和相应能耗
-        df['depth_CO2eq'] = (df['chemicals_CO2eq'] +
-                             df['energy_CO2eq'] * energy_distribution["深度处理区"])
-
-        df['sludge_CO2eq'] = df['energy_CO2eq'] * energy_distribution["污泥处理区"]
-        df['effluent_CO2eq'] = df['energy_CO2eq'] * energy_distribution["出水区"]
-        df['deodorization_CO2eq'] = df['energy_CO2eq'] * energy_distribution["除臭系统"]
+        return df
 
     def calculate_carbon_reduction_metrics(self, df, tech_applied=None):
         """计算碳减排指标"""
