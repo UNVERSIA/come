@@ -611,28 +611,6 @@ class CarbonLSTMPredictor:
 
             predictions.append(pred)
 
-            # 更新输入序列用于下一步预测（递归预测）
-            # 移除序列中最老的时间步
-            updated_sequence = current_sequence_copy[:, 1:, :]
-
-            # 创建新的时间步数据（使用预测值更新碳排放特征，其他特征使用最后已知值）
-            new_timestep = np.copy(current_sequence_copy[:, -1:, :])
-
-            # 更新碳排放特征（目标变量）
-            # 找到目标特征在特征列表中的位置
-            target_idx = self.feature_columns.index('total_CO2eq') if 'total_CO2eq' in self.feature_columns else -1
-
-            if target_idx >= 0:
-                # 缩放预测值以匹配特征尺度
-                pred_scaled_for_features = self.target_scaler.transform([[pred]])[0][0]
-                new_timestep[0, 0, target_idx] =pred_scaled_for_features
-
-            # 将新时间步添加到序列末尾
-            updated_sequence = np.concatenate([updated_sequence, new_timestep], axis=1)
-
-            # 更新当前序列
-            current_sequence_copy = updated_sequence
-
             # 计算置信区间（基于历史误差）
             if len(historical_values) > 10:
                 # 使用历史数据的标准差作为误差估计
