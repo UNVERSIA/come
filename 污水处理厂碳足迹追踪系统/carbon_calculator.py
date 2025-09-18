@@ -1,3 +1,5 @@
+import math
+
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -345,15 +347,13 @@ class CarbonCalculator:
     def _simple_emission_prediction(self, df, future_days):
         """改进的简单预测方法"""
         # 确保输入是DataFrame
-        if not isinstance(df, pd.DataFrame):
-            # 如果不是DataFrame，尝试转换或创建默认DataFrame
-            try:
-                df = pd.DataFrame(df)
-            except:
-                df = pd.DataFrame({
-                    '日期': [datetime.now() - timedelta(days=i) for i in range(30, 0, -1)],
-                    'total_CO2eq': [1000] * 30  # 默认值
-                })
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            # 创建模拟数据
+            dates = [datetime.now() - timedelta(days=i) for i in range(30, 0, -1)]
+            df = pd.DataFrame({
+                '日期': dates,
+                'total_CO2eq': [1000 + np.random.normal(0, 100) for _ in range(30)]  # 添加随机变化
+            })
 
         # 确保有日期列和碳排放列
         if '日期' not in df.columns:
@@ -369,13 +369,17 @@ class CarbonCalculator:
         historical_mean = df['total_CO2eq'].mean()
         historical_std = df['total_CO2eq'].std()
 
-        # 生成预测
+        # 生成预测 - 添加趋势和季节性
         predictions = []
         last_date = df['日期'].max()
 
         for i in range(1, future_days + 1):
-            # 添加一些随机变化
-            prediction = max(0, historical_mean + np.random.normal(0, historical_std * 0.2))
+            # 添加趋势和季节性变化
+            trend = i * 0.5  # 轻微上升趋势
+            seasonal = 100 * math.sin(2 * math.pi * i / 30)  # 月度周期
+            noise = np.random.normal(0, historical_std * 0.2)
+
+            prediction = max(0, historical_mean + trend + seasonal + noise)
             predictions.append({
                 '日期': last_date + timedelta(days=i),
                 'predicted_CO2eq': prediction,
