@@ -1803,6 +1803,9 @@ with tab5:
                 # 计算平均预测值
                 avg_prediction = display_df['预测碳排放(kgCO2eq)'].mean()
 
+                # 初始化change变量，确保在所有情况下都有定义
+                change = 0
+
                 # 计算并显示变化趋势
                 if not st.session_state.historical_data.empty and 'total_CO2eq' in st.session_state.historical_data.columns:
                     # 使用最近30天的数据计算当前平均值（与预测使用的数据范围一致）
@@ -1818,7 +1821,8 @@ with tab5:
 
                     # 确保当前日均值非负（碳排放量不能为负）
                     if current_avg_daily < 0:
-                        st .error(f"错误: 当前日均排放量为负值 ({current_avg_daily:.2f})，这是不可能的。请检查数据计算过程。")
+                        st.error(
+                            f"错误: 当前日均排放量为负值 ({current_avg_daily:.2f})，这是不可能的。请检查数据计算过程。")
                         current_avg_daily = 0  # 强制设为0
 
                         # 确保使用正确的预测数据
@@ -1834,8 +1838,8 @@ with tab5:
                             if is_monthly_prediction:
                                 # 如果是月度预测，需要与历史日度数据的月度聚合比较
                                 historical_monthly_avg = \
-                                historical_data.groupby(historical_data['日期'].dt.to_period('M'))[
-                                    'total_CO2eq'].mean().mean()
+                                    historical_data.groupby(historical_data['日期'].dt.to_period('M'))[
+                                        'total_CO2eq'].mean().mean()
                                 current_comparison_value = historical_monthly_avg
                                 avg_prediction_comparison = avg_prediction
                                 comparison_unit = "月均值"
@@ -1848,7 +1852,7 @@ with tab5:
                             # 确保分母不为零且计算合理的变化率
                             if current_comparison_value > 0:
                                 change = ((
-                                                      avg_prediction_comparison - current_comparison_value) / current_comparison_value * 100)
+                                                  avg_prediction_comparison - current_comparison_value) / current_comparison_value * 100)
 
                                 # 添加合理性检查 - 碳排放变化通常不会超过±50%
                                 if abs(change) > 50:
@@ -1871,20 +1875,23 @@ with tab5:
                     else:
                         st.warning("没有预测数据可用于趋势计算")
                         st.session_state.change_percent = 0
+                else:
+                    st.warning("缺少历史数据，无法计算变化趋势")
+                    st.session_state.change_percent = 0
 
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("平均预测值", f"{avg_prediction:.1f} kgCO2eq/天")
-                    with col2:
-                        # 使用预测数据的上下界来计算区间
-                        avg_lower = display_df['预测下限(kgCO2eq)'].mean()
-                        avg_upper = display_df['预测上限(kgCO2eq)'].mean()
-                        st.metric("预测区间", f"{avg_lower:.1f} - {avg_upper:.1f} kgCO2eq/天")
-                    with col3:
-                        st.metric("变化趋势", f"{change:+.1f}%",
-                                  delta_color="inverse" if change > 0 else "normal")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("平均预测值", f"{avg_prediction:.1f} kgCO2eq/天")
+                with col2:
+                    # 使用预测数据的上下界来计算区间
+                    avg_lower = display_df['预测下限(kgCO2eq)'].mean()
+                    avg_upper = display_df['预测上限(kgCO2eq)'].mean()
+                    st.metric("预测区间", f"{avg_lower:.1f} - {avg_upper:.1f} kgCO2eq/天")
+                with col3:
+                    st.metric("变化趋势", f"{change:+.1f}%",
+                              delta_color="inverse" if change > 0 else "normal")
 
-            # 添加前瞻性指导建议
+            # 添加前瞻性运行指导建议
             st.subheader("前瞻性运行指导建议")
 
             if not st.session_state.prediction_data.empty and not st.session_state.historical_data.empty:
@@ -1895,64 +1902,63 @@ with tab5:
                 # 分析趋势强度
                 trend_strength = "显著" if abs(change_percent) > 15 else "轻微" if abs(change_percent) > 5 else "平稳"
 
-            # 分析趋势强度
-            trend_strength = "显著" if change_percent > 15 else "轻微" if change_percent > 5 else "平稳"
+                # 分析季节性模式
+                historical_monthly = historical_data.copy()
+                historical_monthly['月份'] = historical_monthly['日期'].dt.month
+                monthly_avg = historical_monthly.groupby('月份')['total_CO2eq'].mean()
 
-            # 分析季节性模式
-            historical_monthly = historical_data.copy()
-            historical_monthly['月份'] = historical_monthly['日期'].dt.month
-            monthly_avg = historical_monthly.groupby('月份')['total_CO2eq'].mean()
-
-            if len(monthly_avg) >= 6:  # 至少有半年数据
-                seasonal_variation = monthly_avg.max() - monthly_avg.min()
-                has_seasonal_pattern = seasonal_variation > monthly_avg.mean() * 0.2  # 变化超过20%认为有季节性
-            else:
-                has_seasonal_pattern = False
-
-            # 根据详细分析提供建议
-            if trend == "上升":
-                if trend_strength == "显著":
-                    st.error(f"⚠️ 预警：预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势！")
-                    st.info("""
-                    **紧急措施建议：**
-                    - 立即检查曝气系统运行效率，优化DO控制（目标1.5-2.5mg/L）
-                    - 全面评估化学药剂投加量，减少PAC/PAM过量使用
-                    - 加强进水水质监控，预防冲击负荷影响生化系统
-                    - 考虑实施变频控制改造，降低水泵/风机能耗
-                    - 检查污泥脱水系统运行，优化脱水剂投加
-                    """)
+                if len(monthly_avg) >= 6:  # 至少有半年数据
+                    seasonal_variation = monthly_avg.max() - monthly_avg.min()
+                    has_seasonal_pattern = seasonal_variation > monthly_avg.mean() * 0.2  # 变化超过20%认为有季节性
                 else:
-                    st.warning(f"⚠️ 预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势")
-                    st.info("""
-                    **优化建议：**
-                    - 检查曝气系统效率，优化曝气量控制
-                    - 评估化学药剂投加量，避免过量使用
-                    - 加强进水水质监控，预防冲击负荷
-                    - 考虑实施节能技术改造
-                    """)
-            else:
-                if trend_strength == "显著":
-                    st.success(f"✅ 良好：预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势！")
-                    st.info("""
-                    **巩固措施：**
-                    - 继续保持当前优化运行参数
-                    - 定期校准在线监测仪表，确保数据准确性
-                    - 记录并分析成功经验，形成标准化操作程序
-                    - 探索进一步优化空间，如精准加药控制系统
-                    """)
-                else:
-                    st.success(f"✅ 预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势")
-                    st.info("""
-                    **保持措施：**
-                    - 维持当前优化运行参数
-                    - 继续监控关键工艺指标
-                    - 定期维护设备确保高效运行
-                    """)
+                    has_seasonal_pattern = False
 
-            # 添加季节性建议
-            if has_seasonal_pattern:
-                peak_month = monthly_avg.idxmax()
-                st.info(f"📈 检测到季节性模式：碳排放通常在{peak_month}月达到峰值，建议提前制定应对措施")
+                # 根据详细分析提供建议
+                if trend == "上升":
+                    if trend_strength == "显著":
+                        st.error(
+                            f"⚠️ 预警：预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势！")
+                        st.info("""
+                        **紧急措施建议：**
+                        - 立即检查曝气系统运行效率，优化DO控制（目标1.5-2.5mg/L）
+                        - 全面评估化学药剂投加量，减少PAC/PAM过量使用
+                        - 加强进水水质监控，预防冲击负荷影响生化系统
+                        - 考虑实施变频控制改造，降低水泵/风机能耗
+                        - 检查污泥脱水系统运行，优化脱水剂投加
+                        """)
+                    else:
+                        st.warning(f"⚠️ 预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势")
+                        st.info("""
+                        **优化建议：**
+                        - 检查曝气系统效率，优化曝气量控制
+                        - 评估化学药剂投加量，避免过量使用
+                        - 加强进水水质监控，预防冲击负荷
+                        - 考虑实施节能技术改造
+                        """)
+                else:
+                    if trend_strength == "显著":
+                        st.success(
+                            f"✅ 良好：预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势！")
+                        st.info("""
+                        **巩固措施：**
+                        - 继续保持当前优化运行参数
+                        - 定期校准在线监测仪表，确保数据准确性
+                        - 记录并分析成功经验，形成标准化操作程序
+                        - 探索进一步优化空间，如精准加药控制系统
+                        """)
+                    else:
+                        st.success(f"✅ 预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势")
+                        st.info("""
+                        **保持措施：**
+                        - 维持当前优化运行参数
+                        - 继续监控关键工艺指标
+                        - 定期维护设备确保高效运行
+                        """)
+
+                # 添加季节性建议
+                if has_seasonal_pattern:
+                    peak_month = monthly_avg.idxmax()
+                    st.info(f"📈 检测到季节性模式：碳排放通常在{peak_month}月达到峰值，建议提前制定应对措施")
 
         # 添加技术投资建议（基于预测趋势动态推荐）
         st.subheader("减排技术投资建议")
