@@ -1805,8 +1805,15 @@ with tab5:
 
                 # 计算并显示变化趋势
                 if not st.session_state.historical_data.empty and 'total_CO2eq' in st.session_state.historical_data.columns:
-                    current_avg = st.session_state.historical_data['total_CO2eq'].mean()
-                    change = ((avg_prediction - current_avg) / current_avg * 100) if current_avg > 0 else 0
+                    # 历史数据是日数据，直接求平均
+                    current_avg_daily = st.session_state.historical_data['total_CO2eq'].mean()
+
+                    # 预测数据是月度的，需要转换为日平均值（假设每月30天）
+                    days_in_month = 30
+                    avg_prediction_daily = avg_prediction / days_in_month
+
+                    change = ((
+                                          avg_prediction_daily - current_avg_daily) / current_avg_daily * 100) if current_avg_daily > 0 else 0
 
                     col1, col2, col3 = st.columns(3)
                     with col1:
@@ -1833,13 +1840,17 @@ with tab5:
             recent_data = historical_data[historical_data['日期'].dt.year == latest_year]
 
             if len(recent_data) > 0:
-                current_avg = recent_data['total_CO2eq'].mean()
+                current_avg_daily = recent_data['total_CO2eq'].mean()
             else:
-                current_avg = historical_data['total_CO2eq'].mean()
+                current_avg_daily = historical_data['total_CO2eq'].mean()
 
-            predicted_avg = st.session_state.prediction_data['predicted_CO2eq'].mean()
-            trend = "上升" if predicted_avg > current_avg else "下降"
-            change_percent = abs((predicted_avg - current_avg) / current_avg * 100) if current_avg > 0 else 0
+            # 预测数据是月度的，需要转换为日平均值（假设每月30天）
+            days_in_month = 30
+            predicted_avg_daily = st.session_state.prediction_data['predicted_CO2eq'].mean() / days_in_month
+
+            trend = "上升" if predicted_avg_daily > current_avg_daily else "下降"
+            change_percent = abs(
+                (predicted_avg_daily - current_avg_daily) / current_avg_daily * 100) if current_avg_daily > 0 else 0
 
             # 分析趋势强度
             trend_strength = "显著" if change_percent > 15 else "轻微" if change_percent > 5 else "平稳"
