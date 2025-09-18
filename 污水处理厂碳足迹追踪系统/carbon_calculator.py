@@ -116,18 +116,20 @@ class CarbonCalculator:
         # 处理缺失值
         df = df.fillna(0)
 
-        # N₂O直接排放
-        df['N2O_emission'] = (
+        # N₂O直接排放 - 确保非负
+        df['N2O_emission'] = np.maximum(0, (
                 df['处理水量(m³)'] * (df['进水TN(mg/L)'] - df['出水TN(mg/L)']) *
                 self.EF_N2O * self.C_N2O_N2 / 1000
-        )
+        ))
+
         df['N2O_CO2eq'] = df['N2O_emission'] * self.f_N2O
 
-        # CH4直接排放
-        df['COD_removed'] = (
+        # CH4直接排放 - 确保非负
+        df['COD_removed'] = np.maximum(0, (
                 df['处理水量(m³)'] * np.abs(df['进水COD(mg/L)'] - df['出水COD(mg/L)']) / 1000
-        )
-        df['CH4_emission'] = df['COD_removed'] * self.B0 * self.MCF
+        ))
+
+        df['CH4_emission'] = np.maximum(0, df['COD_removed'] * self.B0 * self.MCF)
         df['CH4_CO2eq'] = df['CH4_emission'] * self.f_CH4
 
         return df
@@ -145,14 +147,14 @@ class CarbonCalculator:
         # 处理缺失值
         df = df.fillna(0)
 
-        # 能耗间接排放
-        df['energy_CO2eq'] = df['电耗(kWh)'] * self.f_e
+        # 能耗间接排放 - 确保非负
+        df['energy_CO2eq'] = np.maximum(0, df['电耗(kWh)'] * self.f_e)
 
-        # 药耗间接排放
-        df['PAC_CO2eq'] = df['PAC投加量(kg)'] * self.EF_chemicals['PAC']
-        df['PAM_CO2eq'] = df['PAM投加量(kg)'] * self.EF_chemicals['PAM']
-        df['NaClO_CO2eq'] = df['次氯酸钠投加量(kg)'] * self.EF_chemicals['次氯酸钠']
-        df['O3_CO2eq'] = df['臭氧投加量(kg)'] * self.EF_chemicals['臭氧']
+        # 药耗间接排放 - 确保非负
+        df['PAC_CO2eq'] = np.maximum(0, df['PAC投加量(kg)'] * self.EF_chemicals['PAC'])
+        df['PAM_CO2eq'] = np.maximum(0, df['PAM投加量(kg)'] * self.EF_chemicals['PAM'])
+        df['NaClO_CO2eq'] = np.maximum(0, df['次氯酸钠投加量(kg)'] * self.EF_chemicals['次氯酸钠'])
+        df['O3_CO2eq'] = np.maximum(0, df['臭氧投加量(kg)'] * self.EF_chemicals['臭氧'])
         df['chemicals_CO2eq'] = df['PAC_CO2eq'] + df['PAM_CO2eq'] + df['NaClO_CO2eq'] + df['O3_CO2eq']
 
         return df
