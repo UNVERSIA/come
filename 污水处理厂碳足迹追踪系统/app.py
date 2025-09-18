@@ -33,38 +33,7 @@ except ImportError as e:
     st.stop()
 
 # 页面配置
-st.set_page_config(
-    page_title="污水处理厂碳足迹追踪系统", 
-    layout="wide", 
-    page_icon="🌍",
-    initial_sidebar_state="expanded"
-)
-
-# 添加CSS样式强制浅色模式
-st.markdown(
-    """
-    <style>
-    .stApp {
-        background-color: white;
-        color: black;
-    }
-    .st-bb {
-        background-color: white;
-    }
-    .st-at {
-        background-color: white;
-    }
-    .main .block-container {
-        background-color: white;
-        color: black;
-    }
-    h1, h2, h3, h4, h5, h6, p, div, span {
-        color: black !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+st.set_page_config(page_title="污水处理厂碳足迹追踪系统", layout="wide", page_icon="🌍")
 st.title("基于碳核算-碳账户模型的污水处理厂碳足迹追踪与评估系统")
 st.markdown("### 第七届全国大学生市政环境AI＋创新实践能力大赛-产业赛道项目")
 
