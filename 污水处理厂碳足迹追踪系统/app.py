@@ -1816,15 +1816,31 @@ with tab5:
                     else:
                         current_avg_daily = historical_data['total_CO2eq'].mean()
 
-                    # 预测数据是月度的，需要转换为日平均值（假设每月30天）
-                    days_in_month = 30
-                    avg_prediction_daily = avg_prediction / days_in_month
+                    # 确保使用正确的预测数据
+                    if not st.session_state.prediction_data.empty:
+                        # 使用实际的预测数据计算平均值
+                        avg_prediction = st.session_state.prediction_data['predicted_CO2eq'].mean()
 
-                    change = ((
-                                          avg_prediction_daily - current_avg_daily) / current_avg_daily * 100) if current_avg_daily > 0 else 0
+                        # 预测数据是月度的，需要转换为日平均值（假设每月30天）
+                        days_in_month = 30
+                        avg_prediction_daily = avg_prediction / days_in_month
 
-                    # 存储change值供后续使用
-                    st.session_state.change_percent = change
+                        # 确保分母不为零
+                        if current_avg_daily > 0:
+                            change = ((avg_prediction_daily - current_avg_daily) / current_avg_daily * 100)
+                        else:
+                            change = 0
+                            st.warning("当前日均排放量为0，无法计算变化百分比")
+
+                        # 存储change值供后续使用
+                        st.session_state.change_percent = change
+
+                        # 添加调试信息
+                        st.write(
+                            f"调试信息 - 当前日均值: {current_avg_daily:.2f}, 预测日均值: {avg_prediction_daily:.2f}, 变化: {change:.2f}%")
+                    else:
+                        st.warning("没有预测数据可用于趋势计算")
+                        st.session_state.change_percent = 0
 
                     col1, col2, col3 = st.columns(3)
                     with col1:
