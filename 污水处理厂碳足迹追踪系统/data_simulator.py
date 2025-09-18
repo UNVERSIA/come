@@ -61,111 +61,57 @@ class DataSimulator:
         noise = self.generate_noise(length, 300)
         return base + seasonal + trend + noise
 
-    def generate_energy_consumption(self, water_flow, cod_in, tn_in, length):
-        """生成能耗数据（与水量、水质相关）"""
-        # 基础能耗系数随水质变化 - 基于实际运行经验
-        base_ratio = 0.25  # 基础能耗系数 kWh/m³
-
-        # COD负荷影响：COD浓度越高，生化处理能耗越大
-        cod_factor = 1 + (cod_in - 200) / 500  # 以200mg/L为标准
-        cod_factor = np.clip(cod_factor, 0.8, 1.5)
-
-        # TN负荷影响：TN浓度越高，硝化反硝化能耗越大
-        tn_factor = 1 + (tn_in - 40) / 100  # 以40mg/L为标准
-        tn_factor = np.clip(tn_factor, 0.9, 1.3)
-
-        # 季节性变化：冬季能耗高（低温），夏季能耗相对低
-        seasonal_var = self.generate_seasonal_pattern(length, 0.08, np.pi)  # 冬高夏低
-
-        # 随机波动
-        noise = self.generate_noise(length, 0.03)
-
-        # 综合计算能耗系数
-        ratios = base_ratio * cod_factor * tn_factor * (1 + seasonal_var + noise)
-        ratios = np.maximum(ratios, 0.15)  # 确保最低能耗
-
+    def generate_energy_consumption(self, water_flow, length):
+        """生成能耗数据（与水量相关）"""
+        base_ratio = 0.3  # 基础能耗系数 kWh/m³
+        seasonal_var = self.generate_seasonal_pattern(length, 0.05, np.pi / 2)
+        noise = self.generate_noise(length, 0.02)
+        ratios = base_ratio + seasonal_var + noise
         return water_flow * ratios
 
-    def generate_chemical_usage(self, water_flow, cod_in, ss_in, length):
-        """生成药剂使用量数据（与水质关联）"""
-        # PAC投加量与悬浮物和COD相关
-        pac_base = 0.015  # 基础投加量 kg/m³
-
-        # SS浓度影响PAC用量
-        ss_factor = 1 + (ss_in - 150) / 300  # 以150mg/L为标准
-        ss_factor = np.clip(ss_factor, 0.7, 1.4)
-
-        # COD影响因子
-        cod_factor = 1 + (cod_in - 200) / 800  # 高COD需要更多混凝剂
-        cod_factor = np.clip(cod_factor, 0.8, 1.2)
-
-        pac_seasonal = self.generate_seasonal_pattern(length, 0.003, np.pi / 3)
-        pac_noise = self.generate_noise(length, 0.002)
-        pac_ratio = pac_base * ss_factor * cod_factor * (1 + pac_seasonal + pac_noise)
+    def generate_chemical_usage(self, water_flow, length):
+        """生成药剂使用量数据"""
+        # PAC投加量 (与水量和季节相关)
+        pac_base = 0.02  # kg/m³
+        pac_seasonal = self.generate_seasonal_pattern(length, 0.005, np.pi)
+        pac_ratio = pac_base + pac_seasonal + self.generate_noise(length, 0.002)
         pac_usage = water_flow * pac_ratio
 
-        # PAM投加量主要与污泥产量相关
-        pam_base = 0.003  # kg/m³
-        sludge_factor = (cod_in / 200) * 0.8 + 0.2  # 污泥产量与COD去除相关
-        pam_ratio = pam_base * sludge_factor * (1 + self.generate_noise(length, 0.0008))
+        # PAM投加量
+        pam_base = 0.005  # kg/m³
+        pam_ratio = pam_base + self.generate_noise(length, 0.001)
         pam_usage = water_flow * pam_ratio
 
-        # 次氯酸钠投加量与出水消毒需求相关
-        naclo_base = 0.008  # kg/m³
-        # 夏季细菌活跃，消毒剂用量增加
-        naclo_seasonal = self.generate_seasonal_pattern(length, 0.002, 0)  # 夏高冬低
-        naclo_ratio = naclo_base * (1 + naclo_seasonal + self.generate_noise(length, 0.001))
+        # 次氯酸钠投加量
+        naclo_base = 0.01  # kg/m³
+        naclo_ratio = naclo_base + self.generate_seasonal_pattern(length, 0.002, np.pi / 4)
         naclo_usage = water_flow * naclo_ratio
 
         return pac_usage, pam_usage, naclo_usage
 
     def generate_water_quality(self, length):
-        """生成具有相关性的水质数据"""
-        # 进水COD - 考虑季节性和工业排放模式
-        cod_in_base = 220  # 调整为更合理的基础值
-        # 春季雨水稀释，夏季浓度高，秋冬工业排放增加
-        cod_in_seasonal = (self.generate_seasonal_pattern(length, 25, np.pi / 6) +
-                           self.generate_seasonal_pattern(length, 15, np.pi))
-        cod_in_trend = self.generate_trend(length, -0.03)  # 逐年改善
-        cod_in_noise = self.generate_noise(length, 12)
+        """生成水质数据"""
+        # 进水COD - 有季节性变化和缓慢改善趋势
+        cod_in_base = 250
+        cod_in_seasonal = self.generate_seasonal_pattern(length, 30, np.pi / 3)
+        cod_in_trend = self.generate_trend(length, -0.05)  # 逐年改善
+        cod_in_noise = self.generate_noise(length, 10)
         cod_in = cod_in_base + cod_in_seasonal + cod_in_trend + cod_in_noise
-        cod_in = np.maximum(cod_in, 80)  # 确保最低浓度
 
-        # 出水COD - 基于去除效率和工艺稳定性
-        base_removal = 0.88  # 基础去除率88%
-        # 进水浓度高时去除率略有提升（生物活性好）
-        concentration_effect = np.minimum(0.05, (cod_in - 200) / 2000)
-        # 工艺改进趋势
-        improvement_trend = self.generate_trend(length, 0.0008)
-        # 运行稳定性波动
-        stability_noise = self.generate_noise(length, 0.02)
+        # 出水COD - 处理效果逐年改善
+        removal_efficiency = 0.85 + self.generate_trend(length, 0.001)  # 效率逐年提高
+        cod_out = cod_in * (1 - removal_efficiency) + self.generate_noise(length, 5)
 
-        actual_removal = base_removal + concentration_effect + improvement_trend + stability_noise
-        actual_removal = np.clip(actual_removal, 0.80, 0.95)  # 限制在合理范围
+        # 进水TN
+        tn_in_base = 40
+        tn_in_seasonal = self.generate_seasonal_pattern(length, 8, np.pi / 2)
+        tn_in_trend = self.generate_trend(length, -0.03)
+        tn_in_noise = self.generate_noise(length, 3)
+        tn_in = tn_in_base + tn_in_seasonal + tn_in_trend + tn_in_noise
 
-        cod_out = cod_in * (1 - actual_removal) + self.generate_noise(length, 3)
-        cod_out = np.maximum(cod_out, 10)  # 确保最低出水浓度
-
-        # 进水TN - 与COD有一定相关性
-        tn_cod_ratio = 0.18 + self.generate_noise(length, 0.02)  # TN/COD比值约0.18
-        tn_cod_ratio = np.clip(tn_cod_ratio, 0.12, 0.25)
-        tn_in_base = cod_in * tn_cod_ratio
-        tn_in_seasonal = self.generate_seasonal_pattern(length, 6, np.pi / 4)
-        tn_in = tn_in_base + tn_in_seasonal + self.generate_noise(length, 2.5)
-        tn_in = np.maximum(tn_in, 15)  # 确保最低浓度
-
-        # 出水TN - 脱氮效果受温度影响显著
-        base_tn_removal = 0.75
-        # 温度影响：夏季脱氮效果好，冬季差
-        temp_effect = self.generate_seasonal_pattern(length, 0.08, 0)  # 夏高冬低
-        # 进水浓度影响
-        load_effect = np.minimum(0.05, (tn_in - 40) / 400)
-
-        tn_removal = base_tn_removal + temp_effect + load_effect + self.generate_noise(length, 0.03)
-        tn_removal = np.clip(tn_removal, 0.65, 0.85)
-
-        tn_out = tn_in * (1 - tn_removal) + self.generate_noise(length, 1.2)
-        tn_out = np.maximum(tn_out, 8)  # 确保最低出水浓度
+        # 出水TN
+        tn_removal = 0.75 + self.generate_trend(length, 0.002)
+        tn_out = tn_in * (1 - tn_removal) + self.generate_noise(length, 1.5)
 
         return cod_in, cod_out, tn_in, tn_out
 
@@ -178,19 +124,11 @@ class DataSimulator:
         date_range = pd.date_range(self.start_date, self.end_date)
         length = len(date_range)
 
-        # 生成相关联的指标数据
+        # 生成各指标数据
         water_flow = self.generate_water_flow(length)
+        energy_consumption = self.generate_energy_consumption(water_flow, length)
+        pac_usage, pam_usage, naclo_usage = self.generate_chemical_usage(water_flow, length)
         cod_in, cod_out, tn_in, tn_out = self.generate_water_quality(length)
-
-        # 生成SS数据（与COD相关）
-        ss_in_base = cod_in * 0.7 + self.generate_noise(length, 15)  # SS通常为COD的0.7倍左右
-        ss_in = np.maximum(ss_in_base, 50)
-        ss_out = ss_in * 0.08 + self.generate_noise(length, 2)  # 92%去除率
-        ss_out = np.maximum(ss_out, 5)
-
-        # 基于水质生成能耗和药剂用量（体现相关性）
-        energy_consumption = self.generate_energy_consumption(water_flow, cod_in, tn_in, length)
-        pac_usage, pam_usage, naclo_usage = self.generate_chemical_usage(water_flow, cod_in, ss_in, length)
 
         # 构建DataFrame - 确保包含LSTM预测器所需的所有列
         data = {
