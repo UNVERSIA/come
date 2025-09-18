@@ -1709,7 +1709,7 @@ with tab5:
             st.info("建议重新训练模型以确保输入形状正确")
 
     # 在预测部分添加数据验证
-    if st.button("进行预测", key="predict_btn"):
+    if st.button("进行预测", key="predict_btn2"):
         # 确保预测器已初始化
         if st.session_state.lstm_predictor is None:
             st.session_state.lstm_predictor = CarbonLSTMPredictor()
