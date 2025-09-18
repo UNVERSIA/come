@@ -247,11 +247,26 @@ class CarbonLSTMPredictor:
         historical_mean = np.mean(historical_values)
         historical_std = np.std(historical_values)
 
-        # 确保目标缩放器已拟合
-        if not hasattr(self.target_scaler, 'n_samples_seen_') or self.target_scaler.n_samples_seen_ == 0:
+        # 确保目标缩放器已拟合 - 修复sklearn版本兼容性问题
+        scaler_fitted = False
+        try:
+            # 检查不同版本sklearn的拟合状态
+            if hasattr(self.target_scaler, 'n_samples_seen_'):
+                scaler_fitted = self.target_scaler.n_samples_seen_ > 0
+            elif hasattr(self.target_scaler, 'scale_'):
+                scaler_fitted = self.target_scaler.scale_ is not None
+            elif hasattr(self.target_scaler, 'data_min_'):
+                scaler_fitted = self.target_scaler.data_min_ is not None
+        except:
+            scaler_fitted = False
+
+        if not scaler_fitted:
             target_values = df[target_column].dropna().values.reshape(-1, 1)
             if len(target_values) > 0:
                 self.target_scaler.fit(target_values)
+            else:
+                # 如果没有目标数据，使用默认范围
+                self.target_scaler.fit([[0], [2000]])  # 假设碳排放在0-2000范围内
 
         # 获取最后一个月的日期作为基准
         last_date = df['日期'].max()
