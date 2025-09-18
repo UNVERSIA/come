@@ -563,11 +563,23 @@ class CarbonLSTMPredictor:
         if len(df) < self.sequence_length:
             # 如果数据不足，使用所有可用数据并填充
             pad_length = self.sequence_length - len(df)
-            padded_df = pd.concat([df] * (pad_length // len(df) + 1), ignore_index=True)
-            df = padded_df.head(self.sequence_length)
-            X = self._prepare_features(df)
-        else:
-            X = self._prepare_features(df.tail(self.sequence_length))
+            # 创建一个包含默认值的模板行
+            default_row = {}
+            for col in self.feature_columns:
+                default_row[col] = self._get_default_value(col)
+            default_row[target_column] = df[target_column].mean() if not df[target_column].empty else 1000
+
+            # 创建填充数据
+            padded_data = []
+            for _ in range(pad_length):
+                padded_data.append(default_row.copy())
+
+            padded_df = pd.DataFrame(padded_data)
+            df = pd.concat([df, padded_df], ignore_index=True)
+            df = df.tail(self.sequence_length)
+
+        # 使用最后30天数据准备特征
+        X = self._prepare_features(df.tail(self.sequence_length))
 
         if X is None or len(X) == 0:
             raise ValueError("无法准备特征数据进行预测")
@@ -752,6 +764,22 @@ class CarbonLSTMPredictor:
     def generate_future_dates(self, last_date, days=7):
         """生成未来日期序列"""
         return [last_date + timedelta(days=i) for i in range(1, days + 1)]
+
+    def _get_default_value(self, col_name):
+        """获取特征的典型默认值"""
+        defaults = {
+            '处理水量(m³)': 10000.0,
+            '电耗(kWh)': 3000.0,
+            'PAC投加量(kg)': 0.0,
+            'PAM投加量(kg)': 0.0,
+            '次氯酸钠投加量(kg)': 0.0,
+            '进水COD(mg/L)': 200.0,
+            '出水COD(mg/L)': 50.0,
+            '进水TN(mg/L)': 40.0,
+            '出水TN(mg/L)': 15.0,
+            'total_CO2eq': 1000.0
+        }
+        return defaults.get(col_name, 0.0)
 
 
 # 使用示例
