@@ -171,12 +171,31 @@ class CarbonLSTMPredictor:
         with open(save_path.replace('.keras', '_architecture.json'), 'w') as json_file:
             json_file.write(model_json)
 
+        # 在 train 方法中保存元数据的部分
+        # 确保所有缩放器都使用可序列化的格式
+        serializable_scalers = {}
+        for col, scaler in self.feature_scalers.items():
+            # 保存缩放器的重要参数以便重建
+            serializable_scalers[col] = {
+                'min_': scaler.min_,
+                'scale_': scaler.scale_,
+                'data_min_': scaler.data_min_,
+                'data_max_': scaler.data_max_,
+                'data_range_': scaler.data_range_
+            }
+
         joblib.dump({
-            'feature_scalers': self.feature_scalers,
+            'feature_scalers': serializable_scalers,
             'sequence_length': self.sequence_length,
             'forecast_days': self.forecast_days,
             'feature_columns': self.feature_columns,
-            'target_scaler': self.target_scaler  # 保存目标缩放器
+            'target_scaler': {
+                'min_': self.target_scaler.min_,
+                'scale_': self.target_scaler.scale_,
+                'data_min_': self.target_scaler.data_min_,
+                'data_max_': self.target_scaler.data_max_,
+                'data_range_': self.target_scaler.data_range_
+            } if hasattr(self.target_scaler, 'min_') else None
         }, save_path.replace('.keras', '_metadata.pkl'))
 
         return history
@@ -415,10 +434,35 @@ class CarbonLSTMPredictor:
                 metadata_path = path
                 break
 
+        # 加载元数据
         if metadata_path and os.path.exists(metadata_path):
             try:
                 metadata = joblib.load(metadata_path)
-                self.feature_scalers = metadata.get('feature_scalers', {})
+                serializable_scalers = metadata.get('feature_scalers', {})
+
+                # 重建特征缩放器
+                self.feature_scalers = {}
+                for col, scaler_params in serializable_scalers.items():
+                    new_scaler = MinMaxScaler()
+                    # 使用保存的参数重建缩放器
+                    if scaler_params is not None:
+                        new_scaler.min_ = scaler_params['min_']
+                        new_scaler.scale_ = scaler_params['scale_']
+                        new_scaler.data_min_ = scaler_params['data_min_']
+                        new_scaler.data_max_ = scaler_params['data_max_']
+                        new_scaler.data_range_ = scaler_params['data_range_']
+                    self.feature_scalers[col] = new_scaler
+
+                # 重建目标缩放器
+                target_scaler_params = metadata.get('target_scaler')
+                self.target_scaler = MinMaxScaler()
+                if target_scaler_params is not None:
+                    self.target_scaler.min_ = target_scaler_params['min_']
+                    self.target_scaler.scale_ = target_scaler_params['scale_']
+                    self.target_scaler.data_min_ = target_scaler_params['data_min_']
+                    self.target_scaler.data_max_ = target_scaler_params['data_max_']
+                    self.target_scaler.data_range_ = target_scaler_params['data_range_']
+
                 self.sequence_length = metadata.get('sequence_length', 30)
                 self.forecast_days = metadata.get('forecast_days', 7)
                 self.feature_columns = metadata.get('feature_columns', [
@@ -426,12 +470,6 @@ class CarbonLSTMPredictor:
                     'PAM投加量(kg)', '次氯酸钠投加量(kg)',
                     '进水COD(mg/L)', '出水COD(mg/L)', '进水TN(mg/L)', '出水TN(mg/L)'
                 ])
-                # 加载目标缩放器（如果存在）
-                if 'target_scaler' in metadata:
-                    self.target_scaler = metadata['target_scaler']
-                else:
-                    # 初始化默认目标缩放器
-                    self.target_scaler = MinMaxScaler()
             except Exception as e:
                 logger.warning(f"加载元数据失败: {str(e)}")
                 # 设置默认值
