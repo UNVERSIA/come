@@ -167,8 +167,8 @@ class CarbonLSTMPredictor:
                 print(f"警告: 特征列 '{col}' 不存在，将使用默认值填充")
                 df[col] = self._get_default_value(col)
 
-        # 填充NaN值
-        df = df.fillna(method='forward').fillna(method='backward').fillna(0)
+        # 填充NaN值 - 修复pandas版本兼容性问题
+        df = df.ffill().bfill().fillna(0)
 
         # 初始化缩放器
         self.feature_scalers = {}
@@ -221,8 +221,8 @@ class CarbonLSTMPredictor:
             if col not in df.columns:
                 df[col] = self._get_default_value(col)
 
-        # 填充NaN值
-        df = df.fillna(0)
+        # 填充NaN值 - 修复pandas兼容性问题
+        df = df.ffill().bfill().fillna(0)
 
         # 使用最后12个月数据作为输入序列
         if len(df) < self.sequence_length:
@@ -325,7 +325,11 @@ class CarbonLSTMPredictor:
             if col not in df.columns or df[col].isna().all():
                 df[col] = self._get_default_value(col)
             elif df[col].isna().any():
-                df[col] = df[col].fillna(df[col].mean())
+                # 修复pandas兼容性问题并加强错误处理
+                col_mean = df[col].mean()
+                if pd.isna(col_mean):
+                    col_mean = self._get_default_value(col)
+                df[col] = df[col].fillna(col_mean)
 
         # 确保所有特征都有缩放器
         for col in self.feature_columns:
