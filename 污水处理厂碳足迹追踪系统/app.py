@@ -1708,46 +1708,6 @@ with tab5:
                 f"⚠️ 模型输入形状不匹配: 预期 {expected_features} 个特征，但模型有 {actual_input_shape[2]} 个输入特征")
             st.info("建议重新训练模型以确保输入形状正确")
 
-    # 在预测部分添加数据验证
-    if st.button("进行预测", key="predict_btn2"):
-        # 确保预测器已初始化
-        if st.session_state.lstm_predictor is None:
-            st.session_state.lstm_predictor = CarbonLSTMPredictor()
-
-        # 尝试加载模型
-        model_loaded = False
-        if st.session_state.lstm_predictor.model is None:
-            try:
-                # 尝试加载预训练模型
-                current_dir = os.path.dirname(os.path.abspath(__file__))
-                models_dir = os.path.join(current_dir, "models")
-                model_path = os.path.join(models_dir, "carbon_lstm_model.keras")
-
-                # 确保目录存在
-                os.makedirs(models_dir, exist_ok=True)
-
-                # 如果模型文件不存在，尝试创建默认模型
-                if not os.path.exists(model_path):
-                    st.info("未找到预训练模型，正在创建默认模型...")
-                    try:
-                        from create_pretrained_model import create_pretrained_model
-
-                        create_pretrained_model()
-                        st.success("默认模型创建成功！")
-                    except Exception as e:
-                        st.error(f"创建默认模型失败: {str(e)}")
-                        st.warning("将使用简单预测方法")
-
-                # 尝试加载模型
-                model_loaded = st.session_state.lstm_predictor.load_model(model_path)
-                if model_loaded:
-                    st.success("✅ 预训练模型加载成功！")
-                else:
-                    st.warning("⚠️ 预训练模型加载失败，将使用简单预测方法")
-            except Exception as e:
-                st.error(f"模型加载失败: {str(e)}")
-                st.info("将使用简单预测方法")
-
         with st.spinner(f"正在进行2025年全年预测..."):
             try:
                 if st.session_state.df is not None:
