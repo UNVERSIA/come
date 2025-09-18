@@ -565,7 +565,6 @@ class CarbonLSTMPredictor:
                 self.model = None
                 return False
 
-
     def predict(self, df, target_column='total_CO2eq', steps=12):
         """改进的月度预测方法"""
         if self.model is None:
@@ -580,7 +579,6 @@ class CarbonLSTMPredictor:
             df = calculator.calculate_direct_emissions(df)
             df = calculator.calculate_indirect_emissions(df)
             df = calculator.calculate_unit_emissions(df)
-
 
         # 确保所有必需的特征列都存在
         for col in self.feature_columns:
@@ -675,6 +673,11 @@ class CarbonLSTMPredictor:
             pred = min(pred, historical_mean + 3 * historical_std)
             pred = max(pred, max(0, historical_mean - 3 * historical_std))
 
+            # 如果预测值为0，则使用历史平均值而不是0
+            if pred == 0:
+                pred = historical_mean
+                print("警告: 预测值为0，使用历史平均值替代")
+
             predictions.append(pred)
 
             # 计算置信区间（基于历史误差）
@@ -687,10 +690,6 @@ class CarbonLSTMPredictor:
                 # 数据不足时使用固定比例
                 lower_bounds.append(max(0, pred * 0.8))
                 upper_bounds.append(pred * 1.2)
-
-            # 对于多步预测，我们不更新输入序列，而是使用相同的输入序列进行所有预测
-            # 这是因为我们无法知道未来的特征值，所以保持输入序列不变
-            # 如果需要更准确的多步预测，应该使用递归预测或序列到序列模型
 
         # 生成预测日期（按月生成）
         if steps == 12:
