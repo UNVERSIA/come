@@ -353,8 +353,8 @@ class CarbonCalculator:
             # 创建模拟数据
             dates = [datetime.now() - timedelta(days=i) for i in range(30, 0, -1)]
             df = pd.DataFrame({
-                    '日期': dates,
-                    'total_CO2eq': [1000 + np.random.normal(0, 100) for _ in range(30)]  # 添加随机变化
+                '日期': dates,
+                'total_CO2eq': [1000 + np.random.normal(0, 100) for _ in range(30)]  # 添加随机变化
             })
 
         # 确保有日期列和碳排放列
@@ -374,19 +374,24 @@ class CarbonCalculator:
         for col in df.select_dtypes(include=[np.number]).columns:
             df[col] = df[col].abs()
 
-        # 确保有日期列和碳排放列
-        if '日期' not in df.columns:
-            df['日期'] = pd.date_range(end=datetime.now(), periods=len(df), freq='D')
-
-        if 'total_CO2eq' not in df.columns:
-            # 计算碳排放
-            df = self.calculate_direct_emissions(df)
-            df = self.calculate_indirect_emissions(df)
-            df = self.calculate_unit_emissions(df)
-
         # 计算历史平均值和趋势
-        historical_mean = df['total_CO2eq'].mean()
-        historical_std = df['total_CO2eq'].std()
+        historical_values = df['total_CO2eq'].values
+        historical_mean = np.mean(historical_values)
+        historical_std = np.std(historical_values)
+
+        # 确保合理的标准差
+        if historical_std == 0:
+            historical_std = historical_mean * 0.1  # 如果没有变化，假设10%的变异
+
+        # 修复：计算更合理的趋势
+        if len(historical_values) > 1:
+            # 使用线性回归计算趋势
+            x = np.arange(len(historical_values))
+            trend_slope = np.polyfit(x, historical_values, 1)[0]
+            # 限制趋势变化不要太大
+            trend_slope = np.clip(trend_slope, -historical_mean * 0.01, historical_mean * 0.01)
+        else:
+            trend_slope = 0
 
         # 生成预测 - 添加趋势和季节性
         predictions = []
@@ -394,16 +399,20 @@ class CarbonCalculator:
 
         for i in range(1, future_days + 1):
             # 添加趋势和季节性变化
-            trend = i * 0.5  # 轻微上升趋势
-            seasonal = 100 * math.sin(2 * math.pi * i / 30)  # 月度周期
-            noise = np.random.normal(0, historical_std * 0.2)
+            trend = trend_slope * i
+            seasonal = historical_mean * 0.05 * math.sin(2 * math.pi * i / 30)  # 月度周期，振幅限制在5%
+            noise = np.random.normal(0, historical_std * 0.1)  # 减小噪声
 
             prediction = max(0, historical_mean + trend + seasonal + noise)
+
+            # 确保预测值在合理范围内（不超过历史均值的±30%）
+            prediction = np.clip(prediction, historical_mean * 0.7, historical_mean * 1.3)
+
             predictions.append({
                 '日期': last_date + timedelta(days=i),
                 'predicted_CO2eq': prediction,
-                'lower_bound': max(0, prediction - historical_std * 0.3),
-                'upper_bound': prediction + historical_std * 0.3
+                'lower_bound': max(0, prediction - historical_std * 0.2),
+                'upper_bound': prediction + historical_std * 0.2
             })
 
         return pd.DataFrame(predictions)
