@@ -1840,7 +1840,7 @@ with tab5:
                 # 初始化change变量，确保在所有情况下都有定义
                 change = 0
 
-                # 计算并显示变化趋势 - 修复版本
+                # 计算并显示变化趋势 - 科学修复版本
                 change = 0  # 默认值
                 if (hasattr(st.session_state, 'prediction_data') and
                         not st.session_state.prediction_data.empty and
@@ -1853,84 +1853,79 @@ with tab5:
                         prediction_data = st.session_state.prediction_data.copy()
 
                         # 确保日期列为datetime类型
-                        if '日期' in historical_data.columns:
-                            historical_data['日期'] = pd.to_datetime(historical_data['日期'])
+                        if 'æ—¥æœŸ' in historical_data.columns:
+                            historical_data['æ—¥æœŸ'] = pd.to_datetime(historical_data['æ—¥æœŸ'])
 
-                        # 计算历史数据的年度趋势变化
-                        historical_data['年份'] = historical_data['日期'].dt.year
-                        yearly_emissions = historical_data.groupby('年份')['total_CO2eq'].sum()
+                        # 判断数据类型：日度还是月度
+                        data_frequency = 'monthly' if 'å¹´æœˆ' in prediction_data.columns or len(
+                            historical_data) < 100 else 'daily'
 
-                        # 计算最近3年的年度变化趋势
-                        if len(yearly_emissions) >= 3:
-                            recent_years = yearly_emissions.tail(3)
-                            # 计算年平均变化率
-                            year_changes = []
-                            for i in range(1, len(recent_years)):
-                                prev_year = recent_years.iloc[i - 1]
-                                curr_year = recent_years.iloc[i]
-                                if prev_year > 0:
-                                    year_change = (curr_year - prev_year) / prev_year * 100
-                                    year_changes.append(year_change)
-
-                            if year_changes:
-                                historical_trend = np.mean(year_changes)
-                            else:
-                                historical_trend = 0
-                        else:
-                            historical_trend = 0
-
-                        # 预测数据分析
-                        if 'predicted_CO2eq' in prediction_data.columns:
-                            # 计算预测年度总量
-                            predicted_annual_total = prediction_data['predicted_CO2eq'].sum()
+                        if data_frequency == 'daily':
+                            # 日度数据：按年聚合
+                            historical_data['å¹´ä»½'] = historical_data['æ—¥æœŸ'].dt.year
+                            yearly_emissions = historical_data.groupby('å¹´ä»½')['total_CO2eq'].sum()
 
                             # 获取最近一年的历史总量
-                            latest_year = yearly_emissions.index[-1] if not yearly_emissions.empty else 2024
                             latest_historical_annual = yearly_emissions.iloc[-1] if not yearly_emissions.empty else 1000
 
-                            # 计算预测相对于最近历史年份的变化
-                            if latest_historical_annual > 0:
-                                predicted_change = ((
-                                                            predicted_annual_total - latest_historical_annual) / latest_historical_annual) * 100
-                            else:
-                                predicted_change = 0
-
-                            # 综合考虑历史趋势和预测变化
-                            # 如果预测变化与历史趋势差异过大，进行平滑处理
-                            if abs(predicted_change - historical_trend) > 50:  # 差异超过50%时进行调整
-                                change = (predicted_change + historical_trend) / 2  # 取平均值
-                            else:
-                                change = predicted_change
-
-                            # 合理性检查：限制变化幅度在-30%到+30%之间
-                            change = np.clip(change, -30, 30)
-
-                            # 添加数据合理性检查
-                            if abs(change) > 200:  # 变化超过200%认为异常
-                                st.warning(f"检测到异常变化率 {change:.1f}%，可能存在数据异常")
-                                # 使用更保守的计算方法
-                                overall_historical_avg = historical_data['total_CO2eq'].mean()
-                                predicted_monthly_avg = prediction_data['predicted_CO2eq'].mean()
-                                change = ((
-                                                      predicted_monthly_avg - overall_historical_avg) / overall_historical_avg) * 100
-                                change = np.clip(change, -50, 50)  # 限制在±50%范围内
-
-                            # 记录计算详情
-                            calculation_details = {
-                                '历史年度总量': latest_historical_annual,
-                                '预测年度总量': predicted_annual_total,
-                                '变化率': change,
-                                '计算基准': '最近年度历史数据'
-                            }
-                            st.session_state.trend_calculation = calculation_details
-
-                            # 显示计算过程（调试用）
-                            with st.expander("趋势计算详情", expanded=False):
-                                st.json(calculation_details)
+                            # 预测年度总量（日度预测需要累加）
+                            predicted_annual_total = prediction_data['predicted_CO2eq'].sum()
 
                         else:
-                            st.warning("历史数据或预测数据存在异常值，无法计算准确的变化趋势")
+                            # 月度数据：直接使用月度平均值计算年度总量
+                            historical_monthly_avg = historical_data['total_CO2eq'].mean()
+                            latest_historical_annual = historical_monthly_avg * 12  # 年度总量
+
+                            # 预测年度总量（月度预测值的总和）
+                            predicted_annual_total = prediction_data['predicted_CO2eq'].sum()
+
+                        # 计算预测相对于历史的变化
+                        if latest_historical_annual > 0:
+                            change = ((
+                                                  predicted_annual_total - latest_historical_annual) / latest_historical_annual) * 100
+                        else:
                             change = 0
+
+                        # 数据合理性检查和修正
+                        if data_frequency == 'monthly' and abs(change) > 200:
+                            # 月度数据可能存在尺度问题，进行修正
+                            st.warning("检测到月度数据尺度异常，正在修正...")
+
+                            # 重新计算：使用月度平均值比较
+                            historical_monthly_avg = historical_data['total_CO2eq'].mean()
+                            predicted_monthly_avg = prediction_data['predicted_CO2eq'].mean()
+
+                            if historical_monthly_avg > 0:
+                                change = ((
+                                                      predicted_monthly_avg - historical_monthly_avg) / historical_monthly_avg) * 100
+
+                            # 更新年度总量计算
+                            latest_historical_annual = historical_monthly_avg * 12
+                            predicted_annual_total = predicted_monthly_avg * 12
+
+                        # 合理性限制：限制变化幅度
+                        original_change = change
+                        change = np.clip(change, -50, 50)  # 限制在±50%范围内
+
+                        if abs(original_change - change) > 1:
+                            st.info(f"变化率已从 {original_change:.1f}% 调整为 {change:.1f}% 以确保合理性")
+
+                        # 记录详细计算信息
+                        calculation_details = {
+                            '数据类型': data_frequency,
+                            '历史年度总量': latest_historical_annual,
+                            '预测年度总量': predicted_annual_total,
+                            '原始变化率': original_change,
+                            '调整后变化率': change,
+                            '计算基准': '年度总量比较' if data_frequency == 'daily' else '月度平均值年化比较'
+                        }
+                        st.session_state.trend_calculation = calculation_details
+
+                        # 显示计算过程
+                        with st.expander("趋势计算详情", expanded=False):
+                            st.json(calculation_details)
+                            if data_frequency == 'monthly':
+                                st.info("月度数据说明：使用月平均值计算年度趋势，预测总量为12个月预测值之和")
 
                     except Exception as e:
                         st.error(f"计算变化趋势时发生错误: {str(e)}")
