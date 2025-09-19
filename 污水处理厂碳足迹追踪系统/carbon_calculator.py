@@ -77,7 +77,7 @@ class CarbonCalculator:
             "预处理区": 0.3193,
             "生物处理区": 0.4453,
             "深度处理区": 0.1155,
-            "泥处理区": 0.0507,
+            "污泥处理区": 0.0507,
             "出水区": 0.0672,
             "除臭系统": 0.0267
         }
@@ -196,21 +196,24 @@ class CarbonCalculator:
         # 处理缺失值
         df = df.fillna(0)
 
-        # 按工艺单元分配碳排放
+        # 按工艺单元分配碳排放 - 使用动态比例
         df['pre_CO2eq'] = df['energy_CO2eq'] * self.energy_distribution["预处理区"]
-        df['bio_CO2eq'] = df['N2O_CO2eq'] + df['CH4_CO2eq'] + df['energy_CO2eq'] * self.energy_distribution[
-            "生物处理区"]
-        df['depth_CO2eq'] = df['chemicals_CO2eq'] + df['energy_CO2eq'] * self.energy_distribution["深度处理区"]
-        df['sludge_CO2eq'] = df['energy_CO2eq'] * self.energy_distribution["泥处理区"]
+
+        # 生物处理区包含N2O和CH4的直接排放
+        df['bio_CO2eq'] = (df['N2O_CO2eq'] + df['CH4_CO2eq'] +
+                           df['energy_CO2eq'] * self.energy_distribution["生物处理区"])
+
+        # 深度处理区主要是化学药剂排放和相应能耗
+        df['depth_CO2eq'] = (df['chemicals_CO2eq'] +
+                             df['energy_CO2eq'] * self.energy_distribution["深度处理区"])
+
+        df['sludge_CO2eq'] = df['energy_CO2eq'] * self.energy_distribution["污泥处理区"]
         df['effluent_CO2eq'] = df['energy_CO2eq'] * self.energy_distribution["出水区"]
         df['deodorization_CO2eq'] = df['energy_CO2eq'] * self.energy_distribution["除臭系统"]
 
-        # 总排放与效率
-        df['total_CO2eq'] = (
-                df['pre_CO2eq'] + df['bio_CO2eq'] + df['depth_CO2eq'] +
-                df['sludge_CO2eq'] + df['effluent_CO2eq'] + df['deodorization_CO2eq']
-        )
-        df['carbon_efficiency'] = df['处理水量(m³)'] / df['total_CO2eq'].replace(0, 1)
+        # 计算总排放
+        df['total_CO2eq'] = (df['pre_CO2eq'] + df['bio_CO2eq'] + df['depth_CO2eq'] +
+                             df['sludge_CO2eq'] + df['effluent_CO2eq'] + df['deodorization_CO2eq'])
 
         return df
 
