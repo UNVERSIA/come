@@ -1874,8 +1874,18 @@ with tab5:
                             days_per_month = historical_data.groupby('年月').size()
                             historical_monthly = (historical_monthly_sum / days_per_month) * 30
 
-                        # 获取最近6个月的历史月均值作为对比基准
-                        recent_historical_monthly_avg = historical_monthly.tail(6).mean()
+                        # 科学的趋势计算：使用全部历史数据而非仅6个月
+                        # 计算长期趋势（全部历史数据）和短期趋势（最近12个月）
+                        historical_monthly_full_avg = historical_monthly.mean()  # 全期平均
+                        historical_monthly_recent_avg = historical_monthly.tail(12).mean()  # 最近12个月平均
+
+                        # 优先使用最近12个月数据，如果数据不足则使用全部数据
+                        if len(historical_monthly) >= 12:
+                            recent_historical_monthly_avg = historical_monthly_recent_avg
+                            calculation_base = "最近12个月历史数据"
+                        else:
+                            recent_historical_monthly_avg = historical_monthly_full_avg
+                            calculation_base = f"全部{len(historical_monthly)}个月历史数据"
 
                         # 确保预测数据是月度数据
                         if 'predicted_CO2eq' in prediction_data.columns:
@@ -1903,11 +1913,13 @@ with tab5:
 
                                 # 记录计算详情
                                 calculation_details = {
-                                    '历史月均值': recent_historical_monthly_avg,
-                                    '预测月均值': predicted_monthly_avg,
-                                    '变化率': change,
-                                    '计算基准': '最近6个月历史数据（已标准化为月度）',
-                                    '数据类型': '月度标准化' if not is_monthly_historical else '原始月度'
+                                    'historical_monthly_avg': recent_historical_monthly_avg,
+                                    'predicted_monthly_avg': predicted_monthly_avg,
+                                    'change_rate': change,
+                                    'calculation_base': calculation_base,  # 使用上面计算的动态基准
+                                    'data_type': '月度标准化' if not is_monthly_historical else '原始月度',
+                                    'data_points_used': len(historical_monthly),
+                                    'prediction_method': st.session_state.get('prediction_method', '未知方法')
                                 }
                                 st.session_state.trend_calculation = calculation_details
 
