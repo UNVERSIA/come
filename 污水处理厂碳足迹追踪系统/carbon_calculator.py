@@ -416,23 +416,56 @@ class CarbonCalculator:
         predictions = []
         last_date = df['日期'].max()
 
-        for i in range(1, future_days + 1):
-            # 添加趋势和季节性变化
-            trend = trend_slope * i
-            seasonal = historical_mean * 0.05 * math.sin(2 * math.pi * i / 30)  # 月度周期，振幅限制在5%
-            noise = np.random.normal(0, historical_std * 0.1)  # 减小噪声
+        # 根据数据类型调整预测逻辑
+        if is_monthly_data:
+            # 月度数据预测：生成12个月的预测
+            prediction_months = min(future_days, 12) if future_days <= 365 else 12
+            for i in range(1, prediction_months + 1):
+                # 月度趋势和季节性
+                trend = trend_slope * i
+                seasonal = historical_mean * 0.08 * math.sin(2 * math.pi * i / 12)  # 年度季节周期
+                noise = np.random.normal(0, historical_std * 0.1)
 
-            prediction = max(0, historical_mean + trend + seasonal + noise)
+                prediction = max(0, historical_mean + trend + seasonal + noise)
+                prediction = np.clip(prediction, historical_mean * 0.7, historical_mean * 1.3)
 
-            # 确保预测值在合理范围内（不超过历史均值的±30%）
-            prediction = np.clip(prediction, historical_mean * 0.7, historical_mean * 1.3)
+                # 生成月末日期
+                if i <= 12:
+                    next_month = (last_date.month + i - 1) % 12 + 1
+                    next_year = last_date.year + ((last_date.month + i - 1) // 12)
+                    # 获取该月的最后一天
+                    if next_month == 12:
+                        next_date = pd.Timestamp(year=next_year, month=next_month, day=31)
+                    else:
+                        next_date = pd.Timestamp(year=next_year, month=next_month + 1, day=1) - timedelta(days=1)
+                else:
+                    next_date = last_date + timedelta(days=30 * i)
 
-            predictions.append({
-                '日期': last_date + timedelta(days=i),
-                'predicted_CO2eq': prediction,
-                'lower_bound': max(0, prediction - historical_std * 0.2),
-                'upper_bound': prediction + historical_std * 0.2
-            })
+                predictions.append({
+                    '日期': next_date,
+                    'predicted_CO2eq': prediction,
+                    'lower_bound': max(0, prediction - historical_std * 0.2),
+                    'upper_bound': prediction + historical_std * 0.2
+                })
+        else:
+            # 日度数据预测
+            for i in range(1, min(future_days + 1, 365)):  # 限制最多预测365天
+                # 添加趋势和季节性变化
+                trend = trend_slope * i
+                seasonal = historical_mean * 0.05 * math.sin(2 * math.pi * i / 30)  # 月度周期，振幅限制在5%
+                noise = np.random.normal(0, historical_std * 0.1)  # 减小噪声
+
+                prediction = max(0, historical_mean + trend + seasonal + noise)
+
+                # 确保预测值在合理范围内（不超过历史均值的±30%）
+                prediction = np.clip(prediction, historical_mean * 0.7, historical_mean * 1.3)
+
+                predictions.append({
+                    '日期': last_date + timedelta(days=i),
+                    'predicted_CO2eq': prediction,
+                    'lower_bound': max(0, prediction - historical_std * 0.2),
+                    'upper_bound': prediction + historical_std * 0.2
+                })
 
         return pd.DataFrame(predictions)
 
