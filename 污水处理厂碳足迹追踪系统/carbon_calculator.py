@@ -350,14 +350,14 @@ class CarbonCalculator:
             return self._simple_emission_prediction(df, future_days)
 
     def _simple_emission_prediction(self, df, future_days):
-        """改进的简单预测方法"""
+        """改进的简单预测方法 - 修复月度/日度数据混淆问题"""
         # 确保输入是DataFrame
         if not isinstance(df, pd.DataFrame) or df.empty:
             # 创建模拟数据
             dates = [datetime.now() - timedelta(days=i) for i in range(30, 0, -1)]
             df = pd.DataFrame({
                 '日期': dates,
-                'total_CO2eq': [1000 + np.random.normal(0, 100) for _ in range(30)]  # 添加随机变化
+                'total_CO2eq': [1000 + np.random.normal(0, 100) for _ in range(30)]
             })
 
         # 确保有日期列和碳排放列
@@ -370,6 +370,13 @@ class CarbonCalculator:
             df = self.calculate_indirect_emissions(df)
             df = self.calculate_unit_emissions(df)
 
+        # 检测数据类型：判断是日度还是月度数据
+        df['日期'] = pd.to_datetime(df['日期'])
+        date_diff = df['日期'].diff().dropna()
+        avg_interval = date_diff.dt.days.mean()
+
+        is_monthly_data = avg_interval > 20  # 如果平均间隔超过20天，认为是月度数据
+
         # 确保没有NaN值
         df = df.fillna(0)
 
@@ -377,25 +384,33 @@ class CarbonCalculator:
         for col in df.select_dtypes(include=[np.number]).columns:
             df[col] = df[col].abs()
 
-            # 计算历史平均值和趋势 - 考虑数据单位一致性
-            historical_values = df['total_CO2eq'].values
+        # 根据数据类型调整预测逻辑
+        historical_values = df['total_CO2eq'].values
+
+        if is_monthly_data:
+            # 月度数据：直接使用月度均值
             historical_mean = np.mean(historical_values)
-            historical_std = np.std(historical_values)
+            print(f"检测到月度数据，月均值: {historical_mean:.2f}")
+        else:
+            # 日度数据：使用日均值
+            historical_mean = np.mean(historical_values)
+            print(f"检测到日度数据，日均值: {historical_mean:.2f}")
 
-            # 确保合理的标准差
-            if historical_std == 0:
-                historical_std = historical_mean * 0.1  # 如果没有变化，假设10%的变异
+        historical_std = np.std(historical_values)
 
-            # 修复：使用更保守的趋势计算，避免数据单位混淆
-            if len(historical_values) > 1:
-                # 使用最近趋势而非全部历史数据
-                recent_values = historical_values[-30:] if len(historical_values) > 30 else historical_values
-                x = np.arange(len(recent_values))
-                trend_slope = np.polyfit(x, recent_values, 1)[0]
-                # 更严格地限制趋势变化，确保预测合理性
-                trend_slope = np.clip(trend_slope, -historical_mean * 0.005, historical_mean * 0.005)
-            else:
-                trend_slope = 0
+        # 确保合理的标准差
+        if historical_std == 0:
+            historical_std = historical_mean * 0.1
+
+        # 趋势计算
+        if len(historical_values) > 1:
+            recent_values = historical_values[-min(len(historical_values), 12):]  # 最近12个数据点
+            x = np.arange(len(recent_values))
+            trend_slope = np.polyfit(x, recent_values, 1)[0]
+            # 限制趋势变化
+            trend_slope = np.clip(trend_slope, -historical_mean * 0.01, historical_mean * 0.01)
+        else:
+            trend_slope = 0
 
         # 生成预测 - 添加趋势和季节性
         predictions = []
