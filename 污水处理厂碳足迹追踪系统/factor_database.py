@@ -6,6 +6,7 @@ import sqlite3
 from typing import Dict, List, Optional
 import threading
 import os
+import re
 
 # 创建线程本地存储
 thread_local = threading.local()
@@ -144,13 +145,13 @@ class CarbonFactorDatabase:
             self.is_fallback = True
 
     def _insert_default_factors(self, conn):
-        """插入默认因子数据"""
+        """插入默认因子数据 - 仅使用官方发布的历史数据"""
         try:
             # 先清空现有数据
             cursor = conn.cursor()
             cursor.execute("DELETE FROM factors")
 
-            # 使用科学的历史数据和合理预测
+            # 使用科学的历史数据和合理预测 - 只包含官方发布的数据
             default_factors = [
                 # 电力排放因子（官方历史数据）
                 ("电力", 0.5703, "kgCO2/kWh", "中国", "2020-01-01", "2020-12-31", "生态环境部公告2023年第10号",
@@ -159,13 +160,6 @@ class CarbonFactorDatabase:
                  "2021年全国电力平均二氧化碳排放因子"),
                 ("电力", 0.5568, "kgCO2/kWh", "中国", "2022-01-01", "2022-12-31", "生态环境部公告2024年第33号",
                  "2022年全国电力平均二氧化碳排放因子"),
-                # 基于电力发展规划的科学预测
-                ("电力", 0.5456, "kgCO2/kWh", "中国", "2023-01-01", "2023-12-31", "基于电力发展趋势预测",
-                 "2023年全国电力平均二氧化碳排放因子预测值"),
-                ("电力", 0.5320, "kgCO2/kWh", "中国", "2024-01-01", "2024-12-31", "基于电力发展趋势预测",
-                 "2024年全国电力平均二氧化碳排放因子预测值"),
-                ("电力", 0.5161, "kgCO2/kWh", "中国", "2025-01-01", "2025-12-31", "基于十四五规划和碳中和目标预测",
-                 "2025年全国电力平均二氧化碳排放因子预测值（考虑可再生能源发展）"),
 
                 # 化学药剂排放因子
                 ("PAC", 1.62, "kgCO2/kg", "通用", "2020-01-01", None, "T/CAEPI 49-2022", "聚合氯化铝排放因子"),
@@ -197,18 +191,71 @@ class CarbonFactorDatabase:
             print(f"插入默认因子数据失败: {e}")
             self.is_fallback = True
 
+    def _extract_year_from_date(self, date_str: str) -> int:
+        """从日期字符串中提取年份"""
+        if not date_str:
+            return datetime.now().year
+
+        # 使用正则表达式提取年份
+        year_match = re.search(r'(\d{4})', str(date_str))
+        if year_match:
+            return int(year_match.group(1))
+
+        # 如果无法提取，返回当前年份
+        return datetime.now().year
+
+    def _get_electricity_factor_by_year(self, year: int) -> float:
+        """根据年份获取官方电力排放因子"""
+        # 官方发布的电力排放因子
+        official_factors = {
+            2020: 0.5703,  # 生态环境部公告2023年第10号
+            2021: 0.5366,  # 生态环境部公告2024年第12号
+            2022: 0.5568,  # 生态环境部公告2024年第33号
+        }
+
+        # 对于官方已发布的年份，使用官方数据
+        if year in official_factors:
+            return official_factors[year]
+
+        # 对于未发布年份（2023年及以后），使用最新官方数据
+        if year >= 2023:
+            # 提醒用户使用的是历史数据
+            if hasattr(self, '_warned_years'):
+                if year not in self._warned_years:
+                    print(f"提醒：{year}年电力排放因子尚未官方发布，使用2022年最新数据(0.5568)")
+                    self._warned_years.add(year)
+            else:
+                self._warned_years = {year}
+                print(f"提醒：{year}年电力排放因子尚未官方发布，使用2022年最新数据(0.5568)")
+            return 0.5568  # 使用最新的2022年官方数据
+
+        # 对于2020年之前的年份，使用2020年数据
+        if year < 2020:
+            return 0.5703  # 2020年数据
+
+        # 默认返回最新官方数据
+        return 0.5568
+
     def get_factor(self, factor_type: str, region: str = "中国", date: Optional[str] = None) -> float:
         """获取指定类型、地区和日期的排放因子"""
         # 回退模式下的默认因子值
         if self.is_fallback:
+            # 电力排放因子根据年份智能选择
+            if factor_type == "电力":
+                if date:
+                    year = self._extract_year_from_date(date)
+                    return self._get_electricity_factor_by_year(year)
+                # 默认使用最新的2022年官方数据
+                return 0.5568
+
+            # 其他因子的默认值
             factors = {
-                "电力": 0.5568 if date and "2022" in date else 0.5366,
                 "PAC": 1.62,
                 "PAM": 1.5,
                 "次氯酸钠": 0.92,
                 "臭氧": 0.8,
-                "N2O": 273,
-                "CH4": 27.9,
+                "N2O": 273,  # IPCC AR6
+                "CH4": 27.9,  # IPCC AR6
                 "沼气发电": 2.5,
                 "光伏发电": 0.85,
                 "热泵技术": 1.2,
@@ -247,8 +294,13 @@ class CarbonFactorDatabase:
 
     def _get_fallback_factor(self, factor_type: str, date: Optional[str] = None) -> float:
         """回退模式下的因子获取方法"""
+        if factor_type == "电力":
+            if date:
+                year = self._extract_year_from_date(date)
+                return self._get_electricity_factor_by_year(year)
+            return 0.5568  # 默认使用最新官方数据
+
         factors = {
-            "电力": 0.5568 if date and "2022" in date else 0.5366,
             "PAC": 1.62,
             "PAM": 1.5,
             "次氯酸钠": 0.92,
@@ -377,6 +429,7 @@ class CarbonFactorDatabase:
                                      description))
 
             conn.commit()
+            print(f"成功更新因子: {factor_type} = {factor_value} {unit}")
         except Exception as e:
             print(f"更新因子失败: {e}")
 
@@ -533,6 +586,18 @@ class CarbonFactorDatabase:
             print(f"导出因子数据失败: {e}")
             return pd.DataFrame()
 
+    def get_data_quality_report(self) -> Dict:
+        """获取数据质量报告"""
+        report = {
+            "官方数据覆盖年份": "2020-2022年（生态环境部发布）",
+            "最新官方数据": "2022年电力排放因子: 0.5568 kgCO2/kWh",
+            "数据来源可靠性": "高（生态环境部官方公告）",
+            "预测数据说明": "2023年及以后使用最新官方数据",
+            "建议更新频率": "每年一次（跟随官方发布）",
+            "数据完整性": "所有必要排放因子均已包含"
+        }
+        return report
+
     def refresh_factors(self):
         """强制更新所有因子值为最新值"""
         if self.is_fallback:
@@ -552,6 +617,7 @@ class CarbonFactorDatabase:
 
             # 重新插入默认因子
             self._insert_default_factors(conn)
+            print("因子数据已刷新至最新版本")
         except Exception as e:
             print(f"刷新因子失败: {e}")
 
