@@ -377,24 +377,25 @@ class CarbonCalculator:
         for col in df.select_dtypes(include=[np.number]).columns:
             df[col] = df[col].abs()
 
-        # 计算历史平均值和趋势
-        historical_values = df['total_CO2eq'].values
-        historical_mean = np.mean(historical_values)
-        historical_std = np.std(historical_values)
+            # 计算历史平均值和趋势 - 考虑数据单位一致性
+            historical_values = df['total_CO2eq'].values
+            historical_mean = np.mean(historical_values)
+            historical_std = np.std(historical_values)
 
-        # 确保合理的标准差
-        if historical_std == 0:
-            historical_std = historical_mean * 0.1  # 如果没有变化，假设10%的变异
+            # 确保合理的标准差
+            if historical_std == 0:
+                historical_std = historical_mean * 0.1  # 如果没有变化，假设10%的变异
 
-        # 修复：计算更合理的趋势
-        if len(historical_values) > 1:
-            # 使用线性回归计算趋势
-            x = np.arange(len(historical_values))
-            trend_slope = np.polyfit(x, historical_values, 1)[0]
-            # 限制趋势变化不要太大
-            trend_slope = np.clip(trend_slope, -historical_mean * 0.01, historical_mean * 0.01)
-        else:
-            trend_slope = 0
+            # 修复：使用更保守的趋势计算，避免数据单位混淆
+            if len(historical_values) > 1:
+                # 使用最近趋势而非全部历史数据
+                recent_values = historical_values[-30:] if len(historical_values) > 30 else historical_values
+                x = np.arange(len(recent_values))
+                trend_slope = np.polyfit(x, recent_values, 1)[0]
+                # 更严格地限制趋势变化，确保预测合理性
+                trend_slope = np.clip(trend_slope, -historical_mean * 0.005, historical_mean * 0.005)
+            else:
+                trend_slope = 0
 
         # 生成预测 - 添加趋势和季节性
         predictions = []
