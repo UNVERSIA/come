@@ -126,34 +126,34 @@ class CarbonLSTMPredictor:
         return history
 
     def _convert_to_monthly(self, daily_df):
-        """将日度数据转换为月度数据 - 修复量级问题"""
+        """将日度数据转换为月度数据 - 科学处理量级一致性"""
         df = daily_df.copy()
         df['日期'] = pd.to_datetime(df['日期'])
         df.set_index('日期', inplace=True)
 
-        # 按月聚合 - 确保碳排放使用日均值而非累积值
+        # 按月聚合 - 保持与数据模拟器一致的聚合逻辑
         monthly_df = df.resample('M').agg({
-            '处理水量(m³)': 'mean',
-            '电耗(kWh)': 'mean',
-            'PAC投加量(kg)': 'mean',
-            'PAM投加量(kg)': 'mean',
-            '次氯酸钠投加量(kg)': 'mean',
-            '进水COD(mg/L)': 'mean',
-            '出水COD(mg/L)': 'mean',
-            '进水TN(mg/L)': 'mean',
-            '出水TN(mg/L)': 'mean',
-            'total_CO2eq': 'mean'  # 关键：使用日均值，不是月累积
+            '处理水量(m³)': 'sum',  # 月总处理水量
+            '电耗(kWh)': 'sum',  # 月总电耗
+            'PAC投加量(kg)': 'sum',  # 月总PAC投加量
+            'PAM投加量(kg)': 'sum',  # 月总PAM投加量
+            '次氯酸钠投加量(kg)': 'sum',  # 月总次氯酸钠投加量
+            '进水COD(mg/L)': 'mean',  # 平均浓度
+            '出水COD(mg/L)': 'mean',  # 平均浓度
+            '进水TN(mg/L)': 'mean',  # 平均浓度
+            '出水TN(mg/L)': 'mean',  # 平均浓度
+            'total_CO2eq': 'sum'  # 关键修改：月总碳排放，保持量级一致性
         }).reset_index()
 
         # 数据验证和调试信息
         if not monthly_df.empty and 'total_CO2eq' in monthly_df.columns:
-            avg_daily_emission = monthly_df['total_CO2eq'].mean()
-            print(f"LSTM转换: 月度日均碳排放 = {avg_daily_emission:.1f} kgCO2eq/天")
+            avg_monthly_emission = monthly_df['total_CO2eq'].mean()
+            print(f"LSTM转换: 月度总碳排放 = {avg_monthly_emission:.1f} kgCO2eq/月")
 
-            # 如果检测到异常高值，进行校正
-            if avg_daily_emission > 10000:
-                print(f"检测到异常高值，进行标准化处理")
-                monthly_df['total_CO2eq'] = monthly_df['total_CO2eq'] / 30
+            # 确保数据量级合理性检查
+            if avg_monthly_emission < 1000:  # 如果月均排放小于1000，可能是日均值
+                print(f"检测到可能的量级问题，将日均值转换为月均值")
+                monthly_df['total_CO2eq'] = monthly_df['total_CO2eq'] * 30  # 粗略转换为月值
 
         monthly_df['年月'] = monthly_df['日期'].dt.strftime('%Y年%m月')
         return monthly_df
