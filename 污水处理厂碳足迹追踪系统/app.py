@@ -1840,7 +1840,7 @@ with tab5:
                 # 初始化change变量，确保在所有情况下都有定义
                 change = 0
 
-                # 计算并显示变化趋势
+                # 计算并显示变化趋势 - 修复量级和计算逻辑
                 change = 0  # 默认值
                 if (hasattr(st.session_state, 'prediction_data') and
                         not st.session_state.prediction_data.empty and
@@ -1856,37 +1856,58 @@ with tab5:
                         if '日期' in historical_data.columns:
                             historical_data['日期'] = pd.to_datetime(historical_data['日期'])
 
-                        # 计算历史数据的月度平均值（用于与月度预测比较）
-                        historical_data['年月'] = historical_data['日期'].dt.to_period('M')
-                        historical_monthly = historical_data.groupby('年月')['total_CO2eq'].mean()
+                        # 判断历史数据是否为月度数据
+                        is_monthly_historical = '年月' in historical_data.columns or len(
+                            historical_data) <= 84  # 7年*12月
+
+                        if is_monthly_historical:
+                            # 历史数据已是月度数据，直接使用
+                            if '年月' not in historical_data.columns:
+                                historical_data['年月'] = historical_data['日期'].dt.to_period('M')
+                            historical_monthly = historical_data.groupby('年月')['total_CO2eq'].mean()
+                        else:
+                            # 历史数据是日度数据，需要转换为月度平均
+                            historical_data['年月'] = historical_data['日期'].dt.to_period('M')
+                            # 先计算每月总和，再转换为月均值
+                            historical_monthly_sum = historical_data.groupby('年月')['total_CO2eq'].sum()
+                            # 计算每月天数以获得日均值，再乘以30得到标准月均值
+                            days_per_month = historical_data.groupby('年月').size()
+                            historical_monthly = (historical_monthly_sum / days_per_month) * 30
 
                         # 获取最近6个月的历史月均值作为对比基准
                         recent_historical_monthly_avg = historical_monthly.tail(6).mean()
 
-                        # 计算预测期间的月均值
+                        # 确保预测数据是月度数据
                         if 'predicted_CO2eq' in prediction_data.columns:
                             predicted_monthly_avg = prediction_data['predicted_CO2eq'].mean()
 
-                            # 验证数据合理性
+                            # 验证数据合理性 - 放宽检查范围，因为月度数据变化较大
                             if recent_historical_monthly_avg > 0 and predicted_monthly_avg > 0:
-                                change = ((
-                                                  predicted_monthly_avg - recent_historical_monthly_avg) / recent_historical_monthly_avg) * 100
+                                # 检查量级是否合理（月度数据应该在合理范围内）
+                                if recent_historical_monthly_avg > 50000:  # 如果历史均值超过5万，可能是累积数据
+                                    recent_historical_monthly_avg = recent_historical_monthly_avg / 30  # 转换为日均值再乘以30
 
-                                # 添加数据合理性检查
-                                if abs(change) > 200:  # 变化超过200%认为异常
-                                    st.warning(f"检测到异常变化率 {change:.1f}%，可能存在数据异常")
+                                change = ((
+                                                      predicted_monthly_avg - recent_historical_monthly_avg) / recent_historical_monthly_avg) * 100
+
+                                # 数据合理性检查 - 月度数据变化范围应更宽松
+                                if abs(change) > 500:  # 变化超过500%认为异常
+                                    st.warning(f"检测到异常变化率 {change:.1f}%，可能存在数据量级不匹配")
                                     # 使用更保守的计算方法
-                                    overall_historical_avg = historical_data['total_CO2eq'].mean()
+                                    overall_historical_avg = historical_monthly.mean()
+                                    if overall_historical_avg > 50000:
+                                        overall_historical_avg = overall_historical_avg / 30
                                     change = ((
-                                                      predicted_monthly_avg - overall_historical_avg) / overall_historical_avg) * 100
-                                    change = np.clip(change, -50, 50)  # 限制在±50%范围内
+                                                          predicted_monthly_avg - overall_historical_avg) / overall_historical_avg) * 100
+                                    change = np.clip(change, -80, 80)  # 月度数据限制在±80%范围内
 
                                 # 记录计算详情
                                 calculation_details = {
                                     '历史月均值': recent_historical_monthly_avg,
                                     '预测月均值': predicted_monthly_avg,
                                     '变化率': change,
-                                    '计算基准': '最近6个月历史数据'
+                                    '计算基准': '最近6个月历史数据（已标准化为月度）',
+                                    '数据类型': '月度标准化' if not is_monthly_historical else '原始月度'
                                 }
                                 st.session_state.trend_calculation = calculation_details
 
