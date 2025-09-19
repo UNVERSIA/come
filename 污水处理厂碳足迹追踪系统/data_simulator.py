@@ -48,23 +48,39 @@ class DataSimulator:
         return seasonal
 
     def generate_trend(self, length, slope):
-        """生成趋势成分"""
-        return slope * np.arange(length)
+        """生成更合理的趋势成分 - 考虑技术进步和环保要求"""
+        # 基础线性趋势
+        base_trend = slope * np.arange(length)
+
+        # 添加技术进步导致的效率提升（逐年递减的改进）
+        years = length / 365.25  # 转换为年数
+        efficiency_improvement = -0.02 * np.log(1 + np.arange(length) / 365.25)  # 每年约2%的效率提升
+
+        return base_trend + efficiency_improvement * 1000  # 适度的改进幅度
 
     def generate_noise(self, length, scale):
         """生成噪声成分"""
         return np.random.normal(0, scale, length)
 
     def generate_water_flow(self, length):
-        """生成处理水量数据"""
+        """生成更科学的处理水量数据"""
         base = 10000  # 基础水量
-        seasonal = self.generate_seasonal_pattern(length, 1500, 0)  # 减小季节波动
-        trend = self.generate_trend(length, 0.2)  # 减小趋势增长
-        noise = self.generate_noise(length, 200)  # 减小随机噪声
-        return np.maximum(base + seasonal + trend + noise, 5000)  # 确保最小值
+
+        # 季节性变化：夏季用水量高，冬季相对低
+        seasonal = self.generate_seasonal_pattern(length, 800, 0)  # 合理的季节波动
+
+        # 长期增长趋势：城市发展导致的缓慢增长
+        trend = self.generate_trend(length, 0.05)  # 非常缓慢的增长
+
+        # 随机波动：日常运行的正常波动
+        noise = self.generate_noise(length, 150)
+
+        # 确保水量在合理范围内
+        water_flow = base + seasonal + trend + noise
+        return np.clip(water_flow, 8000, 15000)  # 限制在合理范围
 
     def generate_energy_consumption(self, water_flow, cod_in, tn_in, length):
-        """生成能耗数据（与水量、水质相关）"""
+        """生成更科学的能耗数据"""
         # 确保输入参数都是数组形式
         if not isinstance(cod_in, np.ndarray):
             cod_in = np.full(length, cod_in)
@@ -73,26 +89,30 @@ class DataSimulator:
         if not isinstance(water_flow, np.ndarray):
             water_flow = np.full(length, water_flow)
 
-        # 基础能耗系数随水质变化 - 基于实际运行经验
-        base_ratio = 0.30  # 提高基础能耗系数 kWh/m³
+        # 基础能耗系数 - 基于实际污水处理厂数据
+        base_ratio = 0.28  # kWh/m³，符合实际水平
 
         # COD负荷影响：COD浓度越高，生化处理能耗越大
-        cod_factor = 1 + (cod_in - 200) / 800  # 减小COD影响系数
-        cod_factor = np.clip(cod_factor, 0.85, 1.3)
+        cod_factor = 1 + (cod_in - 200) / 1000  # 更合理的影响系数
+        cod_factor = np.clip(cod_factor, 0.9, 1.2)
 
         # TN负荷影响：TN浓度越高，硝化反硝化能耗越大
-        tn_factor = 1 + (tn_in - 40) / 150  # 减小TN影响系数
-        tn_factor = np.clip(tn_factor, 0.9, 1.2)
+        tn_factor = 1 + (tn_in - 40) / 200  # 更合理的影响系数
+        tn_factor = np.clip(tn_factor, 0.95, 1.15)
 
-        # 季节性变化：冬季能耗高（低温），夏季能耗相对低
-        seasonal_var = self.generate_seasonal_pattern(length, 0.05, np.pi)  # 减小季节变化
+        # 季节性变化：冬季能耗高（低温影响生化反应），夏季相对低
+        seasonal_var = self.generate_seasonal_pattern(length, 0.08, np.pi)  # 8%的季节变化
+
+        # 技术进步导致的能耗逐年降低
+        years_progress = np.arange(length) / 365.25
+        efficiency_trend = -0.01 * years_progress  # 每年1%的效率提升
 
         # 随机波动
-        noise = self.generate_noise(length, 0.02)  # 减小随机波动
+        noise = self.generate_noise(length, 0.015)  # 1.5%的随机波动
 
         # 综合计算能耗系数
-        ratios = base_ratio * cod_factor * tn_factor * (1 + seasonal_var + noise)
-        ratios = np.clip(ratios, 0.20, 0.45)  # 限制能耗系数范围
+        ratios = base_ratio * cod_factor * tn_factor * (1 + seasonal_var + efficiency_trend + noise)
+        ratios = np.clip(ratios, 0.22, 0.35)  # 限制在合理范围
 
         return water_flow * ratios
 
