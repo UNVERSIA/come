@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
 
+from carbon_calculator import CarbonCalculator
+
 
 class OptimizationEngine:
     def __init__(self, carbon_calculator):
