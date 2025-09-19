@@ -718,14 +718,21 @@ def create_forecast_chart(historical_data, prediction_data):
 
 
 def create_monthly_forecast_chart(monthly_prediction):
-    """创建月度预测图表"""
+    """创建月度预测图表 - 优化版"""
     fig = go.Figure()
 
+    # 确保数据按日期排序
+    monthly_prediction = monthly_prediction.sort_values('日期')
+
+    # 绘制预测线 - 明确标注为月度总量预测
     fig.add_trace(go.Scatter(
-        x=monthly_prediction['年月'], y=monthly_prediction['predicted_CO2eq'],
-        mode='lines+markers', name='月均预测',
+        x=monthly_prediction['年月'],
+        y=monthly_prediction['predicted_CO2eq'],
+        mode='lines+markers',
+        name='2025年月度碳排放预测',
         line=dict(color='#FF7F0E', width=3),
-        textfont=dict(color='black')  # 添加文本颜色
+        marker=dict(size=8),
+        hovertemplate='<b>%{x}</b><br>月度预测: %{y:.0f} kgCO2eq<br>预测类型: 月度总量<extra></extra>'
     ))
 
     # 添加上下界
@@ -775,17 +782,18 @@ def create_monthly_forecast_chart(monthly_prediction):
     # 确保数据按日期排序
     monthly_prediction = monthly_prediction.sort_values('日期')
 
-    # 绘制预测线
+    # 绘制预测线 - 明确标注为月度总量预测
     fig.add_trace(go.Scatter(
         x=monthly_prediction['年月'],
         y=monthly_prediction['predicted_CO2eq'],
         mode='lines+markers',
-        name='月均预测',
+        name='月度预测总量',
         line=dict(color='#FF7F0E', width=3),
         marker=dict(size=8),
-        text=monthly_prediction['predicted_CO2eq'].round(1),
+        text=[f"{val:.0f}" for val in monthly_prediction['predicted_CO2eq']],
         textposition='top center',
-        textfont=dict(color='black', size=10)
+        textfont=dict(color='black', size=10),
+        hovertemplate='<b>%{x}</b><br>月度预测: %{y:.0f} kgCO2eq<extra></extra>'
     ))
 
     # 添加上下界区域
@@ -810,9 +818,9 @@ def create_monthly_forecast_chart(monthly_prediction):
     ))
 
     fig.update_layout(
-        title="2025年月度碳排放预测",
+        title="2025年月度碳排放总量预测",
         xaxis_title="月份",
-        yaxis_title="月均碳排放 (kgCO2eq)",
+        yaxis_title="月度碳排放总量 (kgCO2eq)",
         font=dict(size=14, color="black"),
         plot_bgcolor="rgba(245, 245, 245, 1)",
         paper_bgcolor="rgba(245, 245, 245, 1)",
