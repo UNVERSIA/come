@@ -386,7 +386,7 @@ class CarbonLSTMPredictor:
             return result_df
 
     def _prepare_features_for_prediction(self, df):
-        """为预测准备特征数据"""
+        """为预测准备特征数据 - 修复版本"""
         if df is None or df.empty:
             return None
 
@@ -401,7 +401,6 @@ class CarbonLSTMPredictor:
             if col not in df.columns or df[col].isna().all():
                 df[col] = self._get_default_value(col)
             elif df[col].isna().any():
-                # 修复pandas兼容性问题并加强错误处理
                 col_mean = df[col].mean()
                 if pd.isna(col_mean):
                     col_mean = self._get_default_value(col)
@@ -414,80 +413,49 @@ class CarbonLSTMPredictor:
                 col_values = df[col].values.reshape(-1, 1)
                 self.feature_scalers[col].fit(col_values)
 
-        # 创建序列 - 修复长度不一致问题
-        sequences = []
-
         # 获取最后sequence_length行的数据
         last_data = df.iloc[-self.sequence_length:].copy()
 
-        # 确保所有特征列数据长度一致
-        feature_arrays = []
-        for col in self.feature_columns:
+        # 强制确保数据长度
+        if len(last_data) < self.sequence_length:
+            # 如果数据不足，重复最后一行来填充
+            last_row = last_data.iloc[-1:] if not last_data.empty else pd.DataFrame()
+            while len(last_data) < self.sequence_length:
+                last_data = pd.concat([last_data, last_row], ignore_index=True)
+
+        # 只取前sequence_length行
+        last_data = last_data.iloc[:self.sequence_length]
+
+        # 创建特征矩阵 - 统一处理所有特征
+        feature_matrix = np.zeros((self.sequence_length, len(self.feature_columns)), dtype=np.float32)
+
+        for j, col in enumerate(self.feature_columns):
             col_data = last_data[col].values
 
-            # 确保数据长度正确
+            # 确保长度一致
             if len(col_data) != self.sequence_length:
-                # 如果数据不足，用最后一个值填充
-                if len(col_data) > 0:
-                    last_val = col_data[-1]
-                else:
-                    last_val = self._get_default_value(col)
-
-                # 创建正确长度的数组
-                padded_data = np.full(self.sequence_length, last_val)
-                if len(col_data) > 0:
-                    padded_data[-len(col_data):] = col_data
-                col_data = padded_data
+                col_data = np.resize(col_data, self.sequence_length)
 
             # 处理NaN值
             if np.isnan(col_data).any():
-                col_mean = np.nanmean(col_data)
-                if np.isnan(col_mean):
-                    col_mean = self._get_default_value(col)
+                col_mean = self._get_default_value(col)
                 col_data = np.where(np.isnan(col_data), col_mean, col_data)
-
-            # 确保数据类型为float
-            col_data = col_data.astype(np.float32)
 
             # 缩放数据
             try:
                 scaled_data = self.feature_scalers[col].transform(col_data.reshape(-1, 1)).flatten()
-                # 确保缩放后的数据长度正确
-                if len(scaled_data) != self.sequence_length:
-                    scaled_data = np.resize(scaled_data, self.sequence_length)
+                feature_matrix[:, j] = scaled_data
             except Exception as e:
                 print(f"缩放特征 {col} 时出错: {e}")
-                scaled_data = np.zeros(self.sequence_length, dtype=np.float32)
+                feature_matrix[:, j] = 0.0
 
-            feature_arrays.append(scaled_data)
-
-        # 验证所有特征数组长度一致
-        lengths = [len(arr) for arr in feature_arrays]
-        if len(set(lengths)) > 1:
-            print(f"警告: 特征数组长度不一致: {dict(zip(self.feature_columns, lengths))}")
-            # 统一到sequence_length长度
-            for i in range(len(feature_arrays)):
-                if len(feature_arrays[i]) != self.sequence_length:
-                    feature_arrays[i] = np.resize(feature_arrays[i], self.sequence_length)
-
-        try:
-            # 堆叠特征数组
-            stacked_seq = np.stack(feature_arrays, axis=1)
-            sequences.append(stacked_seq)
-
-            # 验证最终形状
-            expected_shape = (self.sequence_length, len(self.feature_columns))
-            if stacked_seq.shape != expected_shape:
-                print(f"警告: 序列形状不匹配，期望 {expected_shape}，实际 {stacked_seq.shape}")
-                return None
-
-        except Exception as e:
-            print(f"堆叠序列时出错: {e}")
-            print(f"特征数组长度: {[len(arr) for arr in feature_arrays]}")
-            print(f"特征数组形状: {[arr.shape for arr in feature_arrays]}")
+        # 验证形状
+        expected_shape = (self.sequence_length, len(self.feature_columns))
+        if feature_matrix.shape != expected_shape:
+            print(f"错误: 特征矩阵形状 {feature_matrix.shape} 不匹配期望形状 {expected_shape}")
             return None
 
-        return np.array(sequences, dtype=np.float32) if sequences else None
+        return np.array([feature_matrix], dtype=np.float32)
 
     def load_model(self, model_path=None):
         """加载预训练模型 - 兼容性改进版"""
