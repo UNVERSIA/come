@@ -34,7 +34,7 @@ except ImportError as e:
 
 # 页面配置
 st.set_page_config(page_title="污水处理厂碳足迹追踪系统", layout="wide", page_icon="🌍")
-st.title("基于碳核算-碳账户模型的污水处理厂碳足迹追踪、预测与评估系统")
+st.title("基于碳核算-碳账户模型的污水处理厂碳足迹追踪评估系统")
 st.markdown("### 第七届全国大学生市政环境AI＋创新实践能力大赛-产业赛道项目")
 
 
@@ -2569,4 +2569,5 @@ with tab7:
         if __name__ == "__main__":
             # 在开发环境中，Streamlit会自动运行这个文件
             pass
+
 
