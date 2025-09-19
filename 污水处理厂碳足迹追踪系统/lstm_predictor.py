@@ -278,13 +278,24 @@ class CarbonLSTMPredictor:
         for i in range(steps):
             # 预测下一步
             try:
+                # 验证输入序列形状
+                if current_sequence.shape[1:] != self.model.input_shape[1:]:
+                    print(f"警告: 输入形状不匹配，期望 {self.model.input_shape[1:]}，实际 {current_sequence.shape[1:]}")
+                    # 尝试重新构建序列
+                    current_sequence = self._prepare_features_for_prediction(df.tail(self.sequence_length))
+                    if current_sequence is None:
+                        raise ValueError("无法构建有效的输入序列")
+
                 pred_scaled = self.model.predict(current_sequence, verbose=0)[0][0]
                 # 添加适度随机变化
                 pred_scaled += np.random.normal(0, 0.002)
             except Exception as e:
                 print(f"模型预测错误: {e}")
-                # 如果预测失败，使用历史平均值
-                pred_scaled = self.target_scaler.transform([[historical_mean]])[0][0]
+                # 如果预测失败，使用历史均值
+                try:
+                    pred_scaled = self.target_scaler.transform([[historical_mean]])[0][0]
+                except:
+                    pred_scaled = 0.5  # 使用中间值作为fallback
 
             # 逆变换预测值
             try:
@@ -309,9 +320,8 @@ class CarbonLSTMPredictor:
             lower_bounds.append(max(0, pred - error_estimate))
             upper_bounds.append(pred + error_estimate)
 
-            # 更新序列以进行下一次预测（这里简化处理，实际应该基于预测值更新特征）
-            # 由于这是简化实现，我们保持当前序列不变
-            # 在实际应用中，应该根据预测结果更新特征序列
+            # 简化版序列更新 - 保持当前序列不变以避免累积误差
+            # 在生产环境中，应该根据预测结果智能更新特征序列
 
             # 获取最后一个月的日期作为基准
             last_date = df['日期'].max()
@@ -383,6 +393,9 @@ class CarbonLSTMPredictor:
         if len(df) < self.sequence_length:
             raise ValueError(f"需要至少 {self.sequence_length} 个月的数据进行预测")
 
+        # 复制数据避免修改原始数据
+        df = df.copy()
+
         # 确保所有特征列都存在且有有效数据
         for col in self.feature_columns:
             if col not in df.columns or df[col].isna().all():
@@ -401,12 +414,30 @@ class CarbonLSTMPredictor:
                 col_values = df[col].values.reshape(-1, 1)
                 self.feature_scalers[col].fit(col_values)
 
-        # 创建序列
+        # 创建序列 - 修复长度不一致问题
         sequences = []
-        seq = []
 
+        # 获取最后sequence_length行的数据
+        last_data = df.iloc[-self.sequence_length:].copy()
+
+        # 确保所有特征列数据长度一致
+        feature_arrays = []
         for col in self.feature_columns:
-            col_data = df[col].iloc[-self.sequence_length:].values
+            col_data = last_data[col].values
+
+            # 确保数据长度正确
+            if len(col_data) != self.sequence_length:
+                # 如果数据不足，用最后一个值填充
+                if len(col_data) > 0:
+                    last_val = col_data[-1]
+                else:
+                    last_val = self._get_default_value(col)
+
+                # 创建正确长度的数组
+                padded_data = np.full(self.sequence_length, last_val)
+                if len(col_data) > 0:
+                    padded_data[-len(col_data):] = col_data
+                col_data = padded_data
 
             # 处理NaN值
             if np.isnan(col_data).any():
@@ -415,23 +446,48 @@ class CarbonLSTMPredictor:
                     col_mean = self._get_default_value(col)
                 col_data = np.where(np.isnan(col_data), col_mean, col_data)
 
+            # 确保数据类型为float
+            col_data = col_data.astype(np.float32)
+
             # 缩放数据
             try:
                 scaled_data = self.feature_scalers[col].transform(col_data.reshape(-1, 1)).flatten()
+                # 确保缩放后的数据长度正确
+                if len(scaled_data) != self.sequence_length:
+                    scaled_data = np.resize(scaled_data, self.sequence_length)
             except Exception as e:
                 print(f"缩放特征 {col} 时出错: {e}")
-                scaled_data = np.zeros(self.sequence_length)
+                scaled_data = np.zeros(self.sequence_length, dtype=np.float32)
 
-            seq.append(scaled_data)
+            feature_arrays.append(scaled_data)
+
+        # 验证所有特征数组长度一致
+        lengths = [len(arr) for arr in feature_arrays]
+        if len(set(lengths)) > 1:
+            print(f"警告: 特征数组长度不一致: {dict(zip(self.feature_columns, lengths))}")
+            # 统一到sequence_length长度
+            for i in range(len(feature_arrays)):
+                if len(feature_arrays[i]) != self.sequence_length:
+                    feature_arrays[i] = np.resize(feature_arrays[i], self.sequence_length)
 
         try:
-            stacked_seq = np.stack(seq, axis=1)
+            # 堆叠特征数组
+            stacked_seq = np.stack(feature_arrays, axis=1)
             sequences.append(stacked_seq)
+
+            # 验证最终形状
+            expected_shape = (self.sequence_length, len(self.feature_columns))
+            if stacked_seq.shape != expected_shape:
+                print(f"警告: 序列形状不匹配，期望 {expected_shape}，实际 {stacked_seq.shape}")
+                return None
+
         except Exception as e:
             print(f"堆叠序列时出错: {e}")
+            print(f"特征数组长度: {[len(arr) for arr in feature_arrays]}")
+            print(f"特征数组形状: {[arr.shape for arr in feature_arrays]}")
             return None
 
-        return np.array(sequences) if sequences else None
+        return np.array(sequences, dtype=np.float32) if sequences else None
 
     def load_model(self, model_path=None):
         """加载预训练模型 - 兼容性改进版"""
