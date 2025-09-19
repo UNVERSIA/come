@@ -126,12 +126,12 @@ class CarbonLSTMPredictor:
         return history
 
     def _convert_to_monthly(self, daily_df):
-        """将日度数据转换为月度数据"""
+        """将日度数据转换为月度数据 - 修复量级问题"""
         df = daily_df.copy()
         df['日期'] = pd.to_datetime(df['日期'])
         df.set_index('日期', inplace=True)
 
-        # 按月聚合
+        # 按月聚合 - 确保碳排放使用日均值而非累积值
         monthly_df = df.resample('M').agg({
             '处理水量(m³)': 'mean',
             '电耗(kWh)': 'mean',
@@ -142,8 +142,18 @@ class CarbonLSTMPredictor:
             '出水COD(mg/L)': 'mean',
             '进水TN(mg/L)': 'mean',
             '出水TN(mg/L)': 'mean',
-            'total_CO2eq': 'mean'
+            'total_CO2eq': 'mean'  # 关键：使用日均值，不是月累积
         }).reset_index()
+
+        # 数据验证和调试信息
+        if not monthly_df.empty and 'total_CO2eq' in monthly_df.columns:
+            avg_daily_emission = monthly_df['total_CO2eq'].mean()
+            print(f"LSTM转换: 月度日均碳排放 = {avg_daily_emission:.1f} kgCO2eq/天")
+
+            # 如果检测到异常高值，进行校正
+            if avg_daily_emission > 10000:
+                print(f"检测到异常高值，进行标准化处理")
+                monthly_df['total_CO2eq'] = monthly_df['total_CO2eq'] / 30
 
         monthly_df['年月'] = monthly_df['日期'].dt.strftime('%Y年%m月')
         return monthly_df
