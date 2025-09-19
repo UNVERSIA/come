@@ -6,9 +6,11 @@ from carbon_calculator import CarbonCalculator
 
 
 class DataSimulator:
-    def __init__(self):
+    def __init__(self, random_seed=42):
         self.start_date = datetime(2018, 1, 1)
         self.end_date = datetime(2024, 12, 31)
+        # 设置随机种子确保数据一致性，但允许用户修改
+        np.random.seed(random_seed)
 
     def _create_monthly_data(self, daily_df):
         """将日度数据聚合为月度数据"""
@@ -56,17 +58,42 @@ class DataSimulator:
     def generate_water_flow(self, length):
         """生成处理水量数据"""
         base = 10000  # 基础水量
-        seasonal = self.generate_seasonal_pattern(length, 2000, 0)
-        trend = self.generate_trend(length, 0.5)  # 缓慢上升趋势
-        noise = self.generate_noise(length, 300)
-        return base + seasonal + trend + noise
+        seasonal = self.generate_seasonal_pattern(length, 1500, 0)  # 减小季节波动
+        trend = self.generate_trend(length, 0.2)  # 减小趋势增长
+        noise = self.generate_noise(length, 200)  # 减小随机噪声
+        return np.maximum(base + seasonal + trend + noise, 5000)  # 确保最小值
 
-    def generate_energy_consumption(self, water_flow, length):
-        """生成能耗数据（与水量相关）"""
-        base_ratio = 0.3  # 基础能耗系数 kWh/m³
-        seasonal_var = self.generate_seasonal_pattern(length, 0.05, np.pi / 2)
-        noise = self.generate_noise(length, 0.02)
-        ratios = base_ratio + seasonal_var + noise
+    def generate_energy_consumption(self, water_flow, cod_in, tn_in, length):
+        """生成能耗数据（与水量、水质相关）"""
+        # 确保输入参数都是数组形式
+        if not isinstance(cod_in, np.ndarray):
+            cod_in = np.full(length, cod_in)
+        if not isinstance(tn_in, np.ndarray):
+            tn_in = np.full(length, tn_in)
+        if not isinstance(water_flow, np.ndarray):
+            water_flow = np.full(length, water_flow)
+
+        # 基础能耗系数随水质变化 - 基于实际运行经验
+        base_ratio = 0.30  # 提高基础能耗系数 kWh/m³
+
+        # COD负荷影响：COD浓度越高，生化处理能耗越大
+        cod_factor = 1 + (cod_in - 200) / 800  # 减小COD影响系数
+        cod_factor = np.clip(cod_factor, 0.85, 1.3)
+
+        # TN负荷影响：TN浓度越高，硝化反硝化能耗越大
+        tn_factor = 1 + (tn_in - 40) / 150  # 减小TN影响系数
+        tn_factor = np.clip(tn_factor, 0.9, 1.2)
+
+        # 季节性变化：冬季能耗高（低温），夏季能耗相对低
+        seasonal_var = self.generate_seasonal_pattern(length, 0.05, np.pi)  # 减小季节变化
+
+        # 随机波动
+        noise = self.generate_noise(length, 0.02)  # 减小随机波动
+
+        # 综合计算能耗系数
+        ratios = base_ratio * cod_factor * tn_factor * (1 + seasonal_var + noise)
+        ratios = np.clip(ratios, 0.20, 0.45)  # 限制能耗系数范围
+
         return water_flow * ratios
 
     def generate_chemical_usage(self, water_flow, length):
@@ -124,11 +151,11 @@ class DataSimulator:
         date_range = pd.date_range(self.start_date, self.end_date)
         length = len(date_range)
 
-        # 生成各指标数据
+        # 生成各指标数据 - 调整顺序，先生成水质数据
         water_flow = self.generate_water_flow(length)
-        energy_consumption = self.generate_energy_consumption(water_flow, length)
-        pac_usage, pam_usage, naclo_usage = self.generate_chemical_usage(water_flow, length)
         cod_in, cod_out, tn_in, tn_out = self.generate_water_quality(length)
+        energy_consumption = self.generate_energy_consumption(water_flow, cod_in, tn_in, length)
+        pac_usage, pam_usage, naclo_usage = self.generate_chemical_usage(water_flow, length)
 
         # 构建DataFrame - 确保包含LSTM预测器所需的所有列
         data = {
