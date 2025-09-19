@@ -16,8 +16,28 @@ class CarbonCalculator:
             # 创建回退实现
             class FallbackCarbonFactorDatabase:
                 def get_factor(self, factor_type, region="中国", date=None):
+                    # 根据年份动态调整电力排放因子
+                    if factor_type == "电力":
+                        if date:
+                            if "2018" in date:
+                                return 0.5703
+                            elif "2019" in date:
+                                return 0.5593
+                            elif "2020" in date:
+                                return 0.5703
+                            elif "2021" in date:
+                                return 0.5366
+                            elif "2022" in date:
+                                return 0.5568
+                            elif "2023" in date:
+                                return 0.5456
+                            elif "2024" in date:
+                                return 0.5320
+                            elif "2025" in date:
+                                return 0.5161  # 考虑可再生能源发展
+                        return 0.5366  # 默认值
+
                     factors = {
-                        "电力": 0.5568 if date and "2022" in date else 0.5366,
                         "PAC": 1.62,
                         "PAM": 1.5,
                         "次氯酸钠": 0.92,
@@ -33,11 +53,11 @@ class CarbonCalculator:
 
             self.factor_db = FallbackCarbonFactorDatabase()
 
-        # 从数据库获取当前因子
+        # 从数据库获取当前因子 - 根据数据日期动态调整
         try:
             self.f_e = self.factor_db.get_factor("电力", "中国")
         except ValueError:
-            self.f_e = 0.5568  # 默认值
+            self.f_e = 0.5  # 默认值
 
         # 其他固定因子
         self.EF_N2O = 0.016
@@ -135,7 +155,7 @@ class CarbonCalculator:
         return df
 
     def calculate_indirect_emissions(self, df):
-        """计算能耗、药耗间接排放"""
+        """计算能耗、药耗间接排放 - 考虑年份变化"""
         required_cols = ['电耗(kWh)', 'PAC投加量(kg)', 'PAM投加量(kg)', '次氯酸钠投加量(kg)', '臭氧投加量(kg)']
         missing_cols = [col for col in required_cols if col not in df.columns]
         if missing_cols:
@@ -147,8 +167,23 @@ class CarbonCalculator:
         # 处理缺失值
         df = df.fillna(0)
 
-        # 能耗间接排放 - 确保非负
-        df['energy_CO2eq'] = np.maximum(0, df['电耗(kWh)'] * self.f_e)
+        # 根据数据日期动态调整电力排放因子
+        if '日期' in df.columns:
+            df['年份'] = pd.to_datetime(df['日期']).dt.year
+
+            # 为每行数据分配对应年份的电力排放因子
+            electricity_factors = []
+            for year in df['年份']:
+                date_str = f"{year}-01-01"
+                factor = self.factor_db.get_factor("电力", "中国", date_str)
+                electricity_factors.append(factor)
+
+            df['当年电力因子'] = electricity_factors
+            # 能耗间接排放 - 使用动态因子
+            df['energy_CO2eq'] = np.maximum(0, df['电耗(kWh)'] * df['当年电力因子'])
+        else:
+            # 如果没有日期列，使用默认因子
+            df['energy_CO2eq'] = np.maximum(0, df['电耗(kWh)'] * self.f_e)
 
         # 药耗间接排放 - 确保非负
         df['PAC_CO2eq'] = np.maximum(0, df['PAC投加量(kg)'] * self.EF_chemicals['PAC'])
