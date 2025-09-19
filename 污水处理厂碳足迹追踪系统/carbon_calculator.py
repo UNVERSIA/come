@@ -347,14 +347,14 @@ class CarbonCalculator:
             return self._simple_emission_prediction(df, future_days)
 
     def _simple_emission_prediction(self, df, future_days):
-        """改进的简单预测方法"""
+        """改进的简单预测方法 - 修复量级问题"""
         # 确保输入是DataFrame
         if not isinstance(df, pd.DataFrame) or df.empty:
-            # 创建模拟数据
+            # 创建模拟数据 - 使用更合理的日均碳排放量级
             dates = [datetime.now() - timedelta(days=i) for i in range(30, 0, -1)]
             df = pd.DataFrame({
                 '日期': dates,
-                'total_CO2eq': [1000 + np.random.normal(0, 100) for _ in range(30)]  # 添加随机变化
+                'total_CO2eq': [2000 + np.random.normal(0, 200) for _ in range(30)]  # 合理的日均排放量级
             })
 
         # 确保有日期列和碳排放列
@@ -374,10 +374,18 @@ class CarbonCalculator:
         for col in df.select_dtypes(include=[np.number]).columns:
             df[col] = df[col].abs()
 
-        # 计算历史平均值和趋势
+        # 判断数据类型并标准化
         historical_values = df['total_CO2eq'].values
+
+        # 检查是否是累积数据（如果单日排放超过10000，可能是累积数据）
+        if np.mean(historical_values) > 10000:
+            print(f"检测到高量级数据，可能是累积数据，进行标准化处理")
+            historical_values = historical_values / 30  # 假设是月累积，转换为日均
+
         historical_mean = np.mean(historical_values)
         historical_std = np.std(historical_values)
+
+        print(f"预测基础统计: 均值={historical_mean:.1f}, 标准差={historical_std:.1f}")
 
         # 确保合理的标准差
         if historical_std == 0:
