@@ -17,8 +17,6 @@ logger = logging.getLogger(__name__)
 
 warnings.filterwarnings('ignore')
 
-from carbon_calculator import CarbonCalculator
-
 
 class CarbonLSTMPredictor:
     def __init__(self, sequence_length=12, forecast_months=12):  # 改为12个月序列长度，预测12个月
@@ -510,6 +508,7 @@ if __name__ == "__main__":
 
     # 计算总碳排放（如果尚未计算）
     if 'total_CO2eq' not in monthly_data.columns:
+        from carbon_calculator import CarbonCalculator
         calculator = CarbonCalculator()
         monthly_data = calculator.calculate_direct_emissions(monthly_data)
         monthly_data = calculator.calculate_indirect_emissions(monthly_data)
