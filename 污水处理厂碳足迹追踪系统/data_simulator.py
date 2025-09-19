@@ -11,28 +11,39 @@ class DataSimulator:
         self.end_date = datetime(2024, 12, 31)
 
     def _create_monthly_data(self, daily_df):
-        """将日度数据聚合为月度数据 - 修复量级问题"""
+        """将日度数据聚合为月度数据 - 科学处理量级问题"""
         df = daily_df.copy()
         df['日期'] = pd.to_datetime(df['日期'])
 
         # 设置日期为索引
         df.set_index('日期', inplace=True)
 
-        # 按月聚合 - 区分不同类型的指标聚合方式
+        # 按月聚合 - 修正碳排放计算逻辑
         monthly_df = df.resample('M').agg({
-            '处理水量(m³)': 'mean',  # 日均处理水量
-            '电耗(kWh)': 'mean',  # 日均电耗
-            'PAC投加量(kg)': 'mean',  # 日均PAC投加量
-            'PAM投加量(kg)': 'mean',  # 日均PAM投加量
-            '次氯酸钠投加量(kg)': 'mean',  # 日均次氯酸钠投加量
+            '处理水量(m³)': 'sum',  # 月总处理水量
+            '电耗(kWh)': 'sum',  # 月总电耗
+            'PAC投加量(kg)': 'sum',  # 月总PAC投加量
+            'PAM投加量(kg)': 'sum',  # 月总PAM投加量
+            '次氯酸钠投加量(kg)': 'sum',  # 月总次氯酸钠投加量
             '进水COD(mg/L)': 'mean',  # 平均浓度
             '出水COD(mg/L)': 'mean',  # 平均浓度
             '进水TN(mg/L)': 'mean',  # 平均浓度
             '出水TN(mg/L)': 'mean',  # 平均浓度
-            'total_CO2eq': 'mean',  # 日均碳排放 - 这是关键修改点
-            '自来水(m³/d)': 'mean',
-            '脱水污泥外运量(80%)': 'mean'
+            'total_CO2eq': 'sum',  # 月总碳排放 - 关键修改：使用sum而非mean
+            '自来水(m³/d)': 'sum',
+            '脱水污泥外运量(80%)': 'sum'
         }).reset_index()
+
+        # 数据验证和调试信息
+        print(f"月度数据生成完成:")
+        print(
+            f"  - 月度碳排放范围: {monthly_df['total_CO2eq'].min():.1f} - {monthly_df['total_CO2eq'].max():.1f} kgCO2eq/月")
+        print(f"  - 月度碳排放均值: {monthly_df['total_CO2eq'].mean():.1f} kgCO2eq/月")
+
+        # 添加年月标识列
+        monthly_df['年月'] = monthly_df['日期'].dt.strftime('%Y年%m月')
+
+        return monthly_df
 
         # 为了保持与实际运营的一致性，将日均值转换为月度标准值
         # 月度数据应该代表该月的平均日排放量，而不是累积排放量
