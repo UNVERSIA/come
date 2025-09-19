@@ -1841,6 +1841,7 @@ with tab5:
                 change = 0
 
                 # 计算并显示变化趋势
+                # 计算并显示变化趋势 - 修正版本
                 change = 0  # 默认值
                 if (hasattr(st.session_state, 'prediction_data') and
                         not st.session_state.prediction_data.empty and
@@ -1856,21 +1857,24 @@ with tab5:
                         if '日期' in historical_data.columns:
                             historical_data['日期'] = pd.to_datetime(historical_data['日期'])
 
-                        # 计算历史数据的月度平均值（用于与月度预测比较）
+                        # 将历史日度数据转换为月度数据进行公平比较
                         historical_data['年月'] = historical_data['日期'].dt.to_period('M')
-                        historical_monthly = historical_data.groupby('年月')['total_CO2eq'].mean()
+                        historical_monthly = historical_data.groupby('年月')['total_CO2eq'].sum()  # 改为sum()获取月度总量
 
-                        # 获取最近6个月的历史月均值作为对比基准
+                        # 获取最近6个月的历史月度总量的平均值作为对比基准
                         recent_historical_monthly_avg = historical_monthly.tail(6).mean()
 
-                        # 计算预测期间的月均值
+                        # 预测数据本身就是月度平均值，需要转换为可比较的单位
                         if 'predicted_CO2eq' in prediction_data.columns:
+                            # 假设预测数据是日均值，需要乘以30得到月度总量进行比较
+                            predicted_monthly_total = prediction_data['predicted_CO2eq'].mean() * 30
+
                             predicted_monthly_avg = prediction_data['predicted_CO2eq'].mean()
 
                             # 验证数据合理性
-                            if recent_historical_monthly_avg > 0 and predicted_monthly_avg > 0:
+                            if recent_historical_monthly_avg > 0 and predicted_monthly_total > 0:
                                 change = ((
-                                                  predicted_monthly_avg - recent_historical_monthly_avg) / recent_historical_monthly_avg) * 100
+                                                      predicted_monthly_total - recent_historical_monthly_avg) / recent_historical_monthly_avg) * 100
 
                                 # 添加数据合理性检查
                                 if abs(change) > 200:  # 变化超过200%认为异常
