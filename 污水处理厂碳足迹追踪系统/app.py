@@ -1613,6 +1613,9 @@ with tab5:
         # 定义预测天数 - 固定为365天（一年）
         prediction_days = 365
 
+    with predict_col2:
+        st.info("预测2025年全年每月碳排放数据。使用LSTM模型基于2018-2024年历史数据进行预测。")
+
     # 进行预测
     if st.button("进行预测", key="predict_btn"):
         # 确保预测器已初始化
@@ -1787,9 +1790,6 @@ with tab5:
                     st.error(f"所有预测方法均失败: {str(final_error)}")
                     st.session_state.prediction_made = False
 
-    with predict_col2:
-        st.info("预测2025年全年每月碳排放数据。使用LSTM模型基于2018-2024年历史数据进行预测。")
-
     # 第四部分：预测结果显示
     if st.session_state.get('prediction_made', False):
         st.subheader("预测结果")
@@ -1840,8 +1840,7 @@ with tab5:
                 # 初始化change变量，确保在所有情况下都有定义
                 change = 0
 
-                # 计算并显示变化趋势
-                # 计算并显示变化趋势 - 修正版本
+                # 计算并显示变化趋势 - 修复版本
                 change = 0  # 默认值
                 if (hasattr(st.session_state, 'prediction_data') and
                         not st.session_state.prediction_data.empty and
@@ -1857,52 +1856,80 @@ with tab5:
                         if '日期' in historical_data.columns:
                             historical_data['日期'] = pd.to_datetime(historical_data['日期'])
 
-                        # 将历史日度数据转换为月度数据进行公平比较
-                        historical_data['年月'] = historical_data['日期'].dt.to_period('M')
-                        historical_monthly = historical_data.groupby('年月')['total_CO2eq'].sum()  # 改为sum()获取月度总量
+                        # 计算历史数据的年度趋势变化
+                        historical_data['年份'] = historical_data['日期'].dt.year
+                        yearly_emissions = historical_data.groupby('年份')['total_CO2eq'].sum()
 
-                        # 获取最近6个月的历史月度总量的平均值作为对比基准
-                        recent_historical_monthly_avg = historical_monthly.tail(6).mean()
+                        # 计算最近3年的年度变化趋势
+                        if len(yearly_emissions) >= 3:
+                            recent_years = yearly_emissions.tail(3)
+                            # 计算年平均变化率
+                            year_changes = []
+                            for i in range(1, len(recent_years)):
+                                prev_year = recent_years.iloc[i - 1]
+                                curr_year = recent_years.iloc[i]
+                                if prev_year > 0:
+                                    year_change = (curr_year - prev_year) / prev_year * 100
+                                    year_changes.append(year_change)
 
-                        # 预测数据本身就是月度平均值，需要转换为可比较的单位
-                        if 'predicted_CO2eq' in prediction_data.columns:
-                            # 假设预测数据是日均值，需要乘以30得到月度总量进行比较
-                            predicted_monthly_total = prediction_data['predicted_CO2eq'].mean() * 30
-
-                            predicted_monthly_avg = prediction_data['predicted_CO2eq'].mean()
-
-                            # 验证数据合理性
-                            if recent_historical_monthly_avg > 0 and predicted_monthly_total > 0:
-                                change = ((
-                                                      predicted_monthly_total - recent_historical_monthly_avg) / recent_historical_monthly_avg) * 100
-
-                                # 添加数据合理性检查
-                                if abs(change) > 200:  # 变化超过200%认为异常
-                                    st.warning(f"检测到异常变化率 {change:.1f}%，可能存在数据异常")
-                                    # 使用更保守的计算方法
-                                    overall_historical_avg = historical_data['total_CO2eq'].mean()
-                                    change = ((
-                                                      predicted_monthly_avg - overall_historical_avg) / overall_historical_avg) * 100
-                                    change = np.clip(change, -50, 50)  # 限制在±50%范围内
-
-                                # 记录计算详情
-                                calculation_details = {
-                                    '历史月均值': recent_historical_monthly_avg,
-                                    '预测月均值': predicted_monthly_avg,
-                                    '变化率': change,
-                                    '计算基准': '最近6个月历史数据'
-                                }
-                                st.session_state.trend_calculation = calculation_details
-
-                                # 显示计算过程（调试用）
-                                with st.expander("趋势计算详情", expanded=False):
-                                    st.json(calculation_details)
-
+                            if year_changes:
+                                historical_trend = np.mean(year_changes)
                             else:
-                                st.warning("历史数据或预测数据存在异常值，无法计算准确的变化趋势")
-                                change = 0
+                                historical_trend = 0
                         else:
-                            st.warning("预测数据格式异常，缺少'predicted_CO2eq'列")
+                            historical_trend = 0
+
+                        # 预测数据分析
+                        if 'predicted_CO2eq' in prediction_data.columns:
+                            # 计算预测年度总量
+                            predicted_annual_total = prediction_data['predicted_CO2eq'].sum()
+
+                            # 获取最近一年的历史总量
+                            latest_year = yearly_emissions.index[-1] if not yearly_emissions.empty else 2024
+                            latest_historical_annual = yearly_emissions.iloc[-1] if not yearly_emissions.empty else 1000
+
+                            # 计算预测相对于最近历史年份的变化
+                            if latest_historical_annual > 0:
+                                predicted_change = ((
+                                                            predicted_annual_total - latest_historical_annual) / latest_historical_annual) * 100
+                            else:
+                                predicted_change = 0
+
+                            # 综合考虑历史趋势和预测变化
+                            # 如果预测变化与历史趋势差异过大，进行平滑处理
+                            if abs(predicted_change - historical_trend) > 50:  # 差异超过50%时进行调整
+                                change = (predicted_change + historical_trend) / 2  # 取平均值
+                            else:
+                                change = predicted_change
+
+                            # 合理性检查：限制变化幅度在-30%到+30%之间
+                            change = np.clip(change, -30, 30)
+
+                            # 添加数据合理性检查
+                            if abs(change) > 200:  # 变化超过200%认为异常
+                                st.warning(f"检测到异常变化率 {change:.1f}%，可能存在数据异常")
+                                # 使用更保守的计算方法
+                                overall_historical_avg = historical_data['total_CO2eq'].mean()
+                                predicted_monthly_avg = prediction_data['predicted_CO2eq'].mean()
+                                change = ((
+                                                      predicted_monthly_avg - overall_historical_avg) / overall_historical_avg) * 100
+                                change = np.clip(change, -50, 50)  # 限制在±50%范围内
+
+                            # 记录计算详情
+                            calculation_details = {
+                                '历史年度总量': latest_historical_annual,
+                                '预测年度总量': predicted_annual_total,
+                                '变化率': change,
+                                '计算基准': '最近年度历史数据'
+                            }
+                            st.session_state.trend_calculation = calculation_details
+
+                            # 显示计算过程（调试用）
+                            with st.expander("趋势计算详情", expanded=False):
+                                st.json(calculation_details)
+
+                        else:
+                            st.warning("历史数据或预测数据存在异常值，无法计算准确的变化趋势")
                             change = 0
 
                     except Exception as e:
@@ -1942,176 +1969,177 @@ with tab5:
                     )
                     st.caption(f"基于{prediction_method}")
 
-            # 添加前瞻性运行指导建议
-            st.subheader("前瞻性运行指导建议")
+        # 添加前瞻性运行指导建议
+        st.subheader("前瞻性运行指导建议")
 
-            if not st.session_state.prediction_data.empty and not st.session_state.historical_data.empty:
-                # 直接使用前面计算的变化百分比
-                change_percent = st.session_state.get('change_percent', 0)
-                trend = "上升" if change_percent > 0 else "下降"
+        if not st.session_state.prediction_data.empty and not st.session_state.historical_data.empty:
+            # 直接使用前面计算的变化百分比
+            change_percent = st.session_state.get('change_percent', 0)
+            trend = "上升" if change_percent > 0 else "下降"
 
-                # 分析趋势强度
-                trend_strength = "显著" if abs(change_percent) > 15 else "轻微" if abs(change_percent) > 5 else "平稳"
+            # 分析趋势强度
+            trend_strength = "显著" if abs(change_percent) > 15 else "轻微" if abs(change_percent) > 5 else "平稳"
 
-                # 分析季节性模式
-                historical_monthly = historical_data.copy()
-                historical_monthly['月份'] = historical_monthly['日期'].dt.month
-                monthly_avg = historical_monthly.groupby('月份')['total_CO2eq'].mean()
+            # 分析季节性模式
+            historical_data = st.session_state.historical_data.copy()
+            historical_monthly = historical_data.copy()
+            historical_monthly['月份'] = historical_monthly['日期'].dt.month
+            monthly_avg = historical_monthly.groupby('月份')['total_CO2eq'].mean()
 
-                if len(monthly_avg) >= 6:  # 至少有半年数据
-                    seasonal_variation = monthly_avg.max() - monthly_avg.min()
-                    has_seasonal_pattern = seasonal_variation > monthly_avg.mean() * 0.2  # 变化超过20%认为有季节性
-                else:
-                    has_seasonal_pattern = False
-
-                # 根据详细分析提供建议
-                if trend == "上升":
-                    if trend_strength == "显著":
-                        st.error(
-                            f"⚠️ 预警：预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势！")
-                        st.info("""
-                        **紧急措施建议：**
-                        - 立即检查曝气系统运行效率，优化DO控制（目标1.5-2.5mg/L）
-                        - 全面评估化学药剂投加量，减少PAC/PAM过量使用
-                        - 加强进水水质监控，预防冲击负荷影响生化系统
-                        - 考虑实施变频控制改造，降低水泵/风机能耗
-                        - 检查污泥脱水系统运行，优化脱水剂投加
-                        """)
-                    else:
-                        st.warning(f"⚠️ 预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势")
-                        st.info("""
-                        **优化建议：**
-                        - 检查曝气系统效率，优化曝气量控制
-                        - 评估化学药剂投加量，避免过量使用
-                        - 加强进水水质监控，预防冲击负荷
-                        - 考虑实施节能技术改造
-                        """)
-                else:
-                    if trend_strength == "显著":
-                        st.success(
-                            f"✅ 良好：预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势！")
-                        st.info("""
-                        **巩固措施：**
-                        - 继续保持当前优化运行参数
-                        - 定期校准在线监测仪表，确保数据准确性
-                        - 记录并分析成功经验，形成标准化操作程序
-                        - 探索进一步优化空间，如精准加药控制系统
-                        """)
-                    else:
-                        st.success(f"✅ 预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势")
-                        st.info("""
-                        **保持措施：**
-                        - 维持当前优化运行参数
-                        - 继续监控关键工艺指标
-                        - 定期维护设备确保高效运行
-                        """)
-
-                # 添加季节性建议
-                if has_seasonal_pattern:
-                    peak_month = monthly_avg.idxmax()
-                    st.info(f"📈 检测到季节性模式：碳排放通常在{peak_month}月达到峰值，建议提前制定应对措施")
-
-                # 添加技术投资建议（基于预测趋势动态推荐）
-                st.subheader("减排技术投资建议")
-
-                if not st.session_state.prediction_data.empty:
-                    # 根据预测趋势推荐技术
-                    current_avg = st.session_state.historical_data['total_CO2eq'].mean()
-                    predicted_avg = st.session_state.prediction_data['predicted_CO2eq'].mean()
-                    trend = predicted_avg > current_avg  # True表示上升趋势
-
-                    if trend:  # 碳排放上升趋势，推荐高效减排技术
-                        tech_recommendations = {
-                            "高效曝气系统": {
-                                "减排潜力": "15-25%",
-                                "投资回收期": "2-4年",
-                                "适用性": "高",
-                                "推荐理由": "直接降低能耗最大的曝气系统电耗，应对上升趋势最有效"
-                            },
-                            "光伏发电": {
-                                "减排潜力": "20-30%",
-                                "投资回收期": "5-8年",
-                                "适用性": "中",
-                                "推荐理由": "利用厂区空间发电，抵消外购电力碳排放，长期效益好"
-                            },
-                            "智能加药系统": {
-                                "减排潜力": "10-20%",
-                                "投资回收期": "3-5年",
-                                "适用性": "高",
-                                "推荐理由": "精准控制药剂投加，减少化学药剂相关碳排放"
-                            }
-                        }
-                    else:  # 碳排放下降趋势，推荐维持性技术
-                        tech_recommendations = {
-                            "设备能效提升": {
-                                "减排潜力": "5-15%",
-                                "投资回收期": "1-3年",
-                                "适用性": "高",
-                                "推荐理由": "更换高效水泵/风机，持续优化能耗表现"
-                            },
-                            "污泥厌氧消化": {
-                                "减排潜力": "10-20%",
-                                "投资回收期": "3-5年",
-                                "适用性": "中高",
-                                "推荐理由": "利用污泥产沼发电，实现能源回收"
-                            },
-                            "过程控制系统": {
-                                "减排潜力": "8-12%",
-                                "投资回收期": "2-4年",
-                                "适用性": "中",
-                                "推荐理由": "优化全厂运行参数，稳定保持低碳排放水平"
-                            }
-                        }
-
-                    tech_df = pd.DataFrame(tech_recommendations).T
-                    st.dataframe(tech_df)
-
-                    # 添加投资优先级建议
-                    st.info(
-                        "💡 投资优先级建议：根据投资回收期和减排潜力综合评估，建议优先考虑投资回收期短、减排潜力大的技术")
-
-            # 显示模型状态
-            st.subheader("模型状态")
-            if st.session_state.lstm_predictor is not None and st.session_state.lstm_predictor.model is not None:
-                st.success("✅ 模型已加载，可以进行预测")
-            elif st.session_state.lstm_predictor is not None and st.session_state.lstm_predictor.model is None:
-                st.warning("⚠️ 模型未加载，请先加载或训练模型")
+            if len(monthly_avg) >= 6:  # 至少有半年数据
+                seasonal_variation = monthly_avg.max() - monthly_avg.min()
+                has_seasonal_pattern = seasonal_variation > monthly_avg.mean() * 0.2  # 变化超过20%认为有季节性
             else:
-                st.warning("⚠️ 请先加载或训练模型")
+                has_seasonal_pattern = False
 
-            # 显示模型基本信息
-            if st.session_state.lstm_predictor is not None and st.session_state.lstm_predictor.model is not None:
-                model = st.session_state.lstm_predictor.model
-                if hasattr(model, 'summary'):
-                    import io
-                    import contextlib
+            # 根据详细分析提供建议
+            if trend == "上升":
+                if trend_strength == "显著":
+                    st.error(
+                        f"⚠️ 预警：预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势！")
+                    st.info("""
+                    **紧急措施建议：**
+                    - 立即检查曝气系统运行效率，优化DO控制（目标1.5-2.5mg/L）
+                    - 全面评估化学药剂投加量，减少PAC/PAM过量使用
+                    - 加强进水水质监控，预防冲击负荷影响生化系统
+                    - 考虑实施变频控制改造，降低水泵/风机能耗
+                    - 检查污泥脱水系统运行，优化脱水剂投加
+                    """)
+                else:
+                    st.warning(f"⚠️ 预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势")
+                    st.info("""
+                    **优化建议：**
+                    - 检查曝气系统效率，优化曝气量控制
+                    - 评估化学药剂投加量，避免过量使用
+                    - 加强进水水质监控，预防冲击负荷
+                    - 考虑实施节能技术改造
+                    """)
+            else:
+                if trend_strength == "显著":
+                    st.success(
+                        f"✅ 良好：预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势！")
+                    st.info("""
+                    **巩固措施：**
+                    - 继续保持当前优化运行参数
+                    - 定期校准在线监测仪表，确保数据准确性
+                    - 记录并分析成功经验，形成标准化操作程序
+                    - 探索进一步优化空间，如精准加药控制系统
+                    """)
+                else:
+                    st.success(f"✅ 预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势")
+                    st.info("""
+                    **保持措施：**
+                    - 维持当前优化运行参数
+                    - 继续监控关键工艺指标
+                    - 定期维护设备确保高效运行
+                    """)
 
-                    string_buffer = io.StringIO()
-                    with contextlib.redirect_stdout(string_buffer):
-                        model.summary()
-                    model_summary = string_buffer.getvalue()
+            # 添加季节性建议
+            if has_seasonal_pattern:
+                peak_month = monthly_avg.idxmax()
+                st.info(f"📈 检测到季节性模式：碳排放通常在{peak_month}月达到峰值，建议提前制定应对措施")
 
-                    with st.expander("查看模型架构"):
-                        st.text(model_summary)
+            # 添加技术投资建议（基于预测趋势动态推荐）
+            st.subheader("减排技术投资建议")
 
-            # 添加简单预测方法作为备选
-            if st.session_state.df is not None and st.session_state.lstm_predictor is None:
-                st.info("也可以使用简单预测方法（基于历史平均值）")
-                if st.button("使用简单预测", key="simple_predict_btn"):
-                    with st.spinner("正在进行简单预测..."):
-                        calculator = CarbonCalculator()
-                        simple_prediction = calculator._simple_emission_prediction(st.session_state.df, prediction_days)
+            if not st.session_state.prediction_data.empty:
+                # 根据预测趋势推荐技术
+                current_avg = st.session_state.historical_data['total_CO2eq'].mean()
+                predicted_avg = st.session_state.prediction_data['predicted_CO2eq'].mean()
+                trend = predicted_avg > current_avg  # True表示上升趋势
 
-                        # 显示预测图表
-                        df_with_emissions = calculator.calculate_direct_emissions(st.session_state.df)
-                        df_with_emissions = calculator.calculate_indirect_emissions(df_with_emissions)
-                        df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
+                if trend:  # 碳排放上升趋势，推荐高效减排技术
+                    tech_recommendations = {
+                        "高效曝气系统": {
+                            "减排潜力": "15-25%",
+                            "投资回收期": "2-4年",
+                            "适用性": "高",
+                            "推荐理由": "直接降低能耗最大的曝气系统电耗，应对上升趋势最有效"
+                        },
+                        "光伏发电": {
+                            "减排潜力": "20-30%",
+                            "投资回收期": "5-8年",
+                            "适用性": "中",
+                            "推荐理由": "利用厂区空间发电，抵消外购电力碳排放，长期效益好"
+                        },
+                        "智能加药系统": {
+                            "减排潜力": "10-20%",
+                            "投资回收期": "3-5年",
+                            "适用性": "高",
+                            "推荐理由": "精准控制药剂投加，减少化学药剂相关碳排放"
+                        }
+                    }
+                else:  # 碳排放下降趋势，推荐维持性技术
+                    tech_recommendations = {
+                        "设备能效提升": {
+                            "减排潜力": "5-15%",
+                            "投资回收期": "1-3年",
+                            "适用性": "高",
+                            "推荐理由": "更换高效水泵/风机，持续优化能耗表现"
+                        },
+                        "污泥厌氧消化": {
+                            "减排潜力": "10-20%",
+                            "投资回收期": "3-5年",
+                            "适用性": "中高",
+                            "推荐理由": "利用污泥产沼发电，实现能源回收"
+                        },
+                        "过程控制系统": {
+                            "减排潜力": "8-12%",
+                            "投资回收期": "2-4年",
+                            "适用性": "中",
+                            "推荐理由": "优化全厂运行参数，稳定保持低碳排放水平"
+                        }
+                    }
 
-                        historical_data = df_with_emissions[['日期', 'total_CO2eq']].tail(30)
-                        fig = vis.create_carbon_trend_chart(historical_data, simple_prediction)
-                        st.plotly_chart(fig, use_container_width=True)
+                tech_df = pd.DataFrame(tech_recommendations).T
+                st.dataframe(tech_df)
 
-                        st.info("这是基于历史平均值的简单预测，精度较低")
+                # 添加投资优先级建议
+                st.info(
+                    "💡 投资优先级建议：根据投资回收期和减排潜力综合评估，建议优先考虑投资回收期短、减排潜力大的技术")
+
+    # 显示模型状态
+    st.subheader("模型状态")
+    if st.session_state.lstm_predictor is not None and st.session_state.lstm_predictor.model is not None:
+        st.success("✅ 模型已加载，可以进行预测")
+    elif st.session_state.lstm_predictor is not None and st.session_state.lstm_predictor.model is None:
+        st.warning("⚠️ 模型未加载，请先加载或训练模型")
+    else:
+        st.warning("⚠️ 请先加载或训练模型")
+
+    # 显示模型基本信息
+    if st.session_state.lstm_predictor is not None and st.session_state.lstm_predictor.model is not None:
+        model = st.session_state.lstm_predictor.model
+        if hasattr(model, 'summary'):
+            import io
+            import contextlib
+
+            string_buffer = io.StringIO()
+            with contextlib.redirect_stdout(string_buffer):
+                model.summary()
+            model_summary = string_buffer.getvalue()
+
+            with st.expander("查看模型架构"):
+                st.text(model_summary)
+
+    # 添加简单预测方法作为备选
+    if st.session_state.df is not None and st.session_state.lstm_predictor is None:
+        st.info("也可以使用简单预测方法（基于历史平均值）")
+        if st.button("使用简单预测", key="simple_predict_btn"):
+            with st.spinner("正在进行简单预测..."):
+                calculator = CarbonCalculator()
+                simple_prediction = calculator._simple_emission_prediction(st.session_state.df, prediction_days)
+
+                # 显示预测图表
+                df_with_emissions = calculator.calculate_direct_emissions(st.session_state.df)
+                df_with_emissions = calculator.calculate_indirect_emissions(df_with_emissions)
+                df_with_emissions = calculator.calculate_unit_emissions(df_with_emissions)
+
+                historical_data = df_with_emissions[['日期', 'total_CO2eq']].tail(30)
+                fig = vis.create_carbon_trend_chart(historical_data, simple_prediction)
+                st.plotly_chart(fig, use_container_width=True)
+
+                st.info("这是基于历史平均值的简单预测，精度较低")
 
 with tab6:
     st.header("碳减排技术对比分析")
