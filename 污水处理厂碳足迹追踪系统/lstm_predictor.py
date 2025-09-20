@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 warnings.filterwarnings('ignore')
 
+from carbon_calculator import CarbonCalculator
+
 
 class CarbonLSTMPredictor:
     def __init__(self, sequence_length=12, forecast_months=12):  # 改为12个月序列长度，预测12个月
@@ -54,8 +56,8 @@ class CarbonLSTMPredictor:
             Dropout(0.2),
             LSTM(32, return_sequences=False),
             Dropout(0.2),
-            Dense(16),
-            Dense(1)
+            Dense(16, activation='relu'),  # 添加ReLU激活函数
+            Dense(1)  # 输出层不需要激活函数，因为这是回归任务
         ])
 
         model.compile(optimizer='adam', loss='mse', metrics=['mae'])
@@ -124,24 +126,40 @@ class CarbonLSTMPredictor:
         return history
 
     def _convert_to_monthly(self, daily_df):
-        """将日度数据转换为月度数据"""
+        """将日度数据转换为月度数据 - 与数据模拟器保持完全一致"""
         df = daily_df.copy()
         df['日期'] = pd.to_datetime(df['日期'])
         df.set_index('日期', inplace=True)
 
-        # 按月聚合
+        # 按月聚合 - 与data_simulator完全一致的处理逻辑
         monthly_df = df.resample('M').agg({
-            '处理水量(m³)': 'mean',
-            '电耗(kWh)': 'mean',
-            'PAC投加量(kg)': 'mean',
-            'PAM投加量(kg)': 'mean',
-            '次氯酸钠投加量(kg)': 'mean',
-            '进水COD(mg/L)': 'mean',
-            '出水COD(mg/L)': 'mean',
-            '进水TN(mg/L)': 'mean',
-            '出水TN(mg/L)': 'mean',
-            'total_CO2eq': 'mean'
+            '处理水量(m³)': 'mean',  # 与data_simulator一致：使用日均值
+            '电耗(kWh)': 'mean',  # 与data_simulator一致：使用日均值
+            'PAC投加量(kg)': 'mean',  # 与data_simulator一致：使用日均值
+            'PAM投加量(kg)': 'mean',  # 与data_simulator一致：使用日均值
+            '次氯酸钠投加量(kg)': 'mean',  # 与data_simulator一致：使用日均值
+            '进水COD(mg/L)': 'mean',  # 平均浓度
+            '出水COD(mg/L)': 'mean',  # 平均浓度
+            '进水TN(mg/L)': 'mean',  # 平均浓度
+            '出水TN(mg/L)': 'mean',  # 平均浓度
+            'total_CO2eq': 'mean'  # 关键修改：使用日均值保持一致性
         }).reset_index()
+
+        # 标准化为月度表示（乘以30天）- 与data_simulator完全一致
+        scaling_columns = [
+            '处理水量(m³)', '电耗(kWh)', 'PAC投加量(kg)', 'PAM投加量(kg)', 
+            '次氯酸钠投加量(kg)', 'total_CO2eq'
+        ]
+        
+        for col in scaling_columns:
+            if col in monthly_df.columns:
+                monthly_df[col] = monthly_df[col] * 30  # 标准化为月度值
+
+        # 数据验证和调试信息
+        if not monthly_df.empty and 'total_CO2eq' in monthly_df.columns:
+            avg_monthly_emission = monthly_df['total_CO2eq'].mean()
+            print(f"LSTM转换: 标准化月度碳排放 = {avg_monthly_emission:.1f} kgCO2eq/月")
+            print(f"LSTM数据处理方式: 日均值×30天标准化（与data_simulator一致）")
 
         monthly_df['年月'] = monthly_df['日期'].dt.strftime('%Y年%m月')
         return monthly_df
@@ -508,7 +526,6 @@ if __name__ == "__main__":
 
     # 计算总碳排放（如果尚未计算）
     if 'total_CO2eq' not in monthly_data.columns:
-        from carbon_calculator import CarbonCalculator
         calculator = CarbonCalculator()
         monthly_data = calculator.calculate_direct_emissions(monthly_data)
         monthly_data = calculator.calculate_indirect_emissions(monthly_data)
