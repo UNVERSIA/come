@@ -33,8 +33,8 @@ except ImportError as e:
     st.stop()
 
 # 页面配置
-st.set_page_config(page_title="污水处理厂碳足迹追踪系统", layout="wide", page_icon="🌍")
-st.header("基于碳核算-碳账户模型的污水处理厂碳足迹追踪、预测与评估系统")
+st.set_page_config(page_title="污水处理甲烷智能监测与调控系统", layout="wide", page_icon="🌍")
+st.header("寻清问碳：构建低碳目标下的污水处理甲烷智能监测与调控系统")
 
 
 # 初始化session_state
@@ -114,7 +114,7 @@ def initialize_session_state():
             if hasattr(st.session_state.factor_db, 'is_fallback') and st.session_state.factor_db.is_fallback:
                 st.warning("⚠️ 当前处于回退模式，使用默认因子值。某些功能可能受限。")
         except Exception as e:
-            st.error(f"初始化碳因子数据库失败: {e}")
+            st.error(f"初始化甲烷因子数据库失败: {e}")
 
             # 创建一个完整的回退数据库实例
             class FallbackCarbonFactorDatabase:
@@ -170,13 +170,13 @@ def initialize_session_state():
                          "次氯酸钠排放因子"),
                         ("臭氧", 0.8, "kgCO2/kg", "通用", "2020-01-01", None, "研究文献", "臭氧排放因子"),
                         ("沼气发电", 2.5, "kgCO2eq/kWh", "通用", "2020-01-01", None, "研究文献",
-                         "沼气发电碳抵消因子"),
+                         "沼气发电甲烷抵消因子"),
                         ("光伏发电", 0.85, "kgCO2eq/kWh", "通用", "2020-01-01", None, "研究文献",
-                         "光伏发电碳抵消因子"),
+                         "光伏发电甲烷抵消因子"),
                         ("热泵技术", 1.2, "kgCO2eq/kWh", "通用", "2020-01-01", None, "研究文献",
-                         "热泵技术碳抵消因子"),
+                         "热泵技术甲烷抵消因子"),
                         ("污泥资源化", 0.3, "kgCO2eq/kgDS", "通用", "2020-01-01", None, "研究文献",
-                         "污泥资源化碳抵消因子")
+                         "污泥资源化甲烷抵消因子")
                     ]
 
                     df = pd.DataFrame(default_factors, columns=[
@@ -203,7 +203,7 @@ def initialize_session_state():
             '投资成本_万元': [500, 300, 200, 150, 100],
             '回收期_年': [5, 8, 4, 6, 7],
             '适用性': ['高', '中', '高', '中', '低'],
-            '碳减排贡献率_%': [25, 15, 20, 12, 8],
+            '甲烷减排贡献率_%': [25, 15, 20, 12, 8],
             '能源中和率_%': [30, 40, 10, 15, 5]
         })
     if 'component_value' not in st.session_state:
@@ -920,7 +920,7 @@ with st.sidebar:
             st.session_state.df_selected = simulated_data.tail(30)  # 使用最近30天数据
             st.success("模拟数据生成完成！")
 
-    if st.button("重置碳因子数据库"):
+    if st.button("重置甲烷因子数据库"):
         try:
             # 删除数据库文件
             import os
@@ -935,8 +935,8 @@ with st.sidebar:
 
 # 主界面使用选项卡组织内容
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-    "工艺流程仿真", "碳足迹追踪", "碳账户管理", "优化与决策",
-    "碳排放预测", "减排技术分析", "因子库管理"
+    "工艺流程仿真", "甲烷足迹追踪", "甲烷账户管理", "优化与决策",
+    "甲烷排放预测", "减排技术分析", "因子库管理"
 ])
 
 with tab1:
@@ -1038,7 +1038,7 @@ with tab1:
                 min_value=0.0
             )
         st.subheader(f"{selected_unit} - 当前状态")
-        st.metric("碳排放量", f"{unit_params['emission']:.2f} kgCO2eq")
+        st.metric("甲烷排放量", f"{unit_params['emission']:.2f} kgCO2eq")
         st.metric("运行状态", status_text)
         if "water_flow" in unit_params:
             st.metric("处理水量", f"{unit_params['water_flow']:.0f} m³")
@@ -1080,11 +1080,11 @@ with tab1:
             st.info("消毒接触池对处理后的水进行消毒，确保水质安全")
 
 with tab2:
-    st.header("碳足迹追踪与评估")
+    st.header("甲烷足迹追踪与评估")
     # 初始化calculator对象
     calculator = CarbonCalculator()
 
-    # 如果有选中的数据，进行碳核算计算
+    # 如果有选中的数据，进行甲烷核算计算
     if 'df_selected' in st.session_state and st.session_state.df_selected is not None:
         df_selected = st.session_state.df_selected
         try:
@@ -1102,41 +1102,41 @@ with tab2:
                 "除臭系统": df_calc['deodorization_CO2eq'].sum()  # 新增除臭系统
             }
         except Exception as e:
-            st.error(f"碳核算计算错误: {str(e)}")
+            st.error(f"甲烷核算计算错误: {str(e)}")
             st.stop()
 
-    # 工艺全流程碳排热力图
+    # 工艺全流程甲烷排放热力图
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("工艺全流程碳排热力图")
+        st.subheader("工艺全流程甲烷排放热力图")
         if st.session_state.emission_data:
             heatmap_fig = vis.create_heatmap_overlay(st.session_state.emission_data)
             st.plotly_chart(heatmap_fig)
         else:
             st.warning("请先上传运行数据")
     with col2:
-        st.subheader("碳流动态追踪图谱")
+        st.subheader("甲烷动态追踪图谱")
         if 'df_calc' in st.session_state and st.session_state.df_calc is not None:
             sankey_fig = vis.create_sankey_diagram(st.session_state.df_calc)
             st.plotly_chart(sankey_fig)
         else:
             st.warning("请先上传运行数据")
 
-    # 碳排放效率排行榜
+    # 甲烷排放效率排行榜
     if 'df_calc' in st.session_state and st.session_state.df_calc is not None:
-        st.subheader("碳排放效率排行榜")
+        st.subheader("甲烷排放效率排行榜")
         eff_fig = vis.create_efficiency_ranking(st.session_state.df_calc)
         st.plotly_chart(eff_fig)
 
 with tab3:
-    st.header("碳账户管理")
+    st.header("甲烷账户管理")
     if 'df_calc' in st.session_state and st.session_state.df_calc is not None:
         df_calc = st.session_state.df_calc
         # 碳账户明细（包含除臭系统）
-        st.subheader("碳账户收支明细（当月）")
+        st.subheader("甲烷账户收支明细（当月）")
         account_df = pd.DataFrame({
             "工艺单元": ["预处理区", "生物处理区", "深度处理区", "泥处理区", "出水区", "除臭系统"],
-            "碳流入(kgCO2eq)": [
+            "甲烷流入(kgCO2eq)": [
                 df_calc['energy_CO2eq'].sum() * 0.3193,
                 df_calc['energy_CO2eq'].sum() * 0.4453,
                 df_calc['energy_CO2eq'].sum() * 0.1155 + df_calc['chemicals_CO2eq'].sum(),
@@ -1144,7 +1144,7 @@ with tab3:
                 df_calc['energy_CO2eq'].sum() * 0.0672,
                 df_calc['energy_CO2eq'].sum() * 0.0267  # 除臭系统能耗占比
             ],
-            "碳流出(kgCO2eq)": [
+            "甲烷流出(kgCO2eq)": [
                 df_calc['pre_CO2eq'].sum(),
                 df_calc['bio_CO2eq'].sum(),
                 df_calc['depth_CO2eq'].sum(),
@@ -1193,7 +1193,7 @@ with tab3:
         """)
         col1, col2 = st.columns([1, 1])
         with col1:
-            formula_name = st.text_input("公式名称", "单位水处理碳排放")
+            formula_name = st.text_input("公式名称", "单位水处理甲烷排放")
             formula_expression = st.text_area("公式表达式", "energy * 0.9419 / water_flow")
             if st.button("保存公式"):
                 if formula_name and formula_expression:
@@ -1314,8 +1314,8 @@ with tab4:
                 current_total = 0
 
             if historical_mean > 0 and current_total > 1.5 * historical_mean:
-                st.warning(f"⚠️ 异常预警：当月单位水量碳排放（{current_total:.4f} kgCO2eq/m³）超历史均值50%！")
-                # 识别主要问题区域（包含除臭系统）
+                st.warning(f"⚠️ 异常预警：当月单位水量甲烷排放（{current_total:.4f} kgCO2eq/m³）超历史均值50%！")
+                # 识别主要问题区域（包含除臭系统）甲烷
                 unit_emissions = {
                     "预处理区": df_calc['pre_CO2eq'].sum() / current_water,
                     "生物处理区": df_calc['bio_CO2eq'].sum() / current_water,
@@ -1354,7 +1354,7 @@ with tab4:
                     st.write("- 检查脱水设备运行效率")
                     st.write("- 考虑污泥资源化利用途径")
             else:
-                st.success("✅ 当月碳排放水平正常")
+                st.success("✅ 当月甲烷排放水平正常")
         else:
             st.info("数据量不足，无法进行异常识别")
 
@@ -1405,7 +1405,7 @@ with tab4:
             opt_fig.update_layout(
                 title=f"优化效果：月度减排{(df_calc['total_CO2eq'].sum() - optimized_total):.1f} kgCO2eq",
                 title_font=dict(color="black"),  # 标题文字颜色改为黑色
-                yaxis_title="总碳排放（kgCO2eq/月）",
+                yaxis_title="总甲烷排放（kgCO2eq/月）",
                 yaxis_title_font=dict(color="black"),  # Y轴标题文字颜色改为黑色
                 font=dict(size=14, color="black"),  # 整体文字颜色改为黑色
                 plot_bgcolor="rgba(245, 245, 245, 1)",
@@ -1450,7 +1450,7 @@ with tab4:
         st.warning("请先上传运行数据")
 
 with tab5:
-    st.header("碳排放趋势预测")
+    st.header("甲烷排放趋势预测")
 
     # 第一部分：加载预训练模型
     st.subheader("1. 模型管理")
@@ -1499,10 +1499,10 @@ with tab5:
                 if not model_loaded:
                     # 尝试从GitHub项目结构加载模型
                     github_model_paths = [
-                        os.path.join(current_dir, "碳足迹追踪系统", "models", "carbon_lstm_model.keras"),
-                        os.path.join(current_dir, "碳足迹追踪系统", "models", "carbon_lstm_model.h5"),
-                        os.path.join(current_dir, "碳足迹追踪系统", "models", "carbon_lstm.keras"),
-                        os.path.join(current_dir, "碳足迹追踪系统", "models", "carbon_lstm.h5")
+                        os.path.join(current_dir, "甲烷足迹追踪系统", "models", "carbon_lstm_model.keras"),
+                        os.path.join(current_dir, "甲烷足迹追踪系统", "models", "carbon_lstm_model.h5"),
+                        os.path.join(current_dir, "甲烷足迹追踪系统", "models", "carbon_lstm.keras"),
+                        os.path.join(current_dir, "甲烷足迹追踪系统", "models", "carbon_lstm.h5")
                     ]
 
                     for model_path in github_model_paths:
@@ -1551,7 +1551,7 @@ with tab5:
             if st.session_state.df is not None and len(st.session_state.df) >= 30:
                 with st.spinner("正在训练新模型，这可能需要几分钟..."):
                     try:
-                        # 确保数据已计算碳排放
+                        # 确保数据已计算甲烷排放
                         calculator = CarbonCalculator()
                         df_with_emissions = calculator.calculate_direct_emissions(st.session_state.df)
                         df_with_emissions = calculator.calculate_indirect_emissions(df_with_emissions)
@@ -1628,7 +1628,7 @@ with tab5:
                 current_dir = os.path.dirname(os.path.abspath(__file__))
 
                 # 检查是否在GitHub项目结构下
-                github_project_dir = os.path.join(current_dir, "碳足迹追踪系统")
+                github_project_dir = os.path.join(current_dir, "甲烷足迹追踪系统")
                 if os.path.exists(github_project_dir):
                     current_dir = github_project_dir
 
@@ -1789,7 +1789,7 @@ with tab5:
                     st.session_state.prediction_made = False
 
     with predict_col2:
-        st.info("预测2025年全年每月碳排放数据。使用LSTM模型基于2018-2024年历史数据进行预测。")
+        st.info("预测2025年全年每月甲烷排放数据。使用LSTM模型基于2018-2024年历史数据进行预测。")
 
     # 第四部分：预测结果显示
     if st.session_state.get('prediction_made', False):
@@ -1824,19 +1824,19 @@ with tab5:
             if '日期' in display_df.columns:
                 display_df = display_df[['日期', 'predicted_CO2eq', 'lower_bound', 'upper_bound']]
                 display_df = display_df.rename(columns={
-                    'predicted_CO2eq': '预测碳排放(kgCO2eq)',
+                    'predicted_CO2eq': '预测甲烷排放(kgCO2eq)',
                     'lower_bound': '预测下限(kgCO2eq)',
                     'upper_bound': '预测上限(kgCO2eq)'
                 })
 
                 # 格式化数值
-                for col in ['预测碳排放(kgCO2eq)', '预测下限(kgCO2eq)', '预测上限(kgCO2eq)']:
+                for col in ['预测甲烷排放(kgCO2eq)', '预测下限(kgCO2eq)', '预测上限(kgCO2eq)']:
                     display_df[col] = display_df[col].round(1)
 
                 st.dataframe(display_df, height=300)
 
                 # 计算平均预测值
-                avg_prediction = display_df['预测碳排放(kgCO2eq)'].mean()
+                avg_prediction = display_df['预测甲烷排放(kgCO2eq)'].mean()
 
                 # 初始化change变量，确保在所有情况下都有定义
                 change = 0
@@ -1899,15 +1899,15 @@ with tab5:
                                 # 科学解释变化趋势
                                 trend_explanation = ""
                                 if change > 10:
-                                    trend_explanation = "预测2025年碳排放将显著上升，建议加强节能减排措施"
+                                    trend_explanation = "预测2025年甲烷排放将显著上升，建议加强节能减排措施"
                                 elif change > 5:
-                                    trend_explanation = "预测2025年碳排放将适度上升"
+                                    trend_explanation = "预测2025年甲烷排放将适度上升"
                                 elif change > -5:
-                                    trend_explanation = "预测2025年碳排放将保持相对稳定"
+                                    trend_explanation = "预测2025年甲烷排放将保持相对稳定"
                                 elif change > -10:
-                                    trend_explanation = "预测2025年碳排放将适度下降"
+                                    trend_explanation = "预测2025年甲烷排放将适度下降"
                                 else:
-                                    trend_explanation = "预测2025年碳排放将显著下降，减排效果良好"
+                                    trend_explanation = "预测2025年甲烷排放将显著下降，减排效果良好"
 
                                 # 记录详细计算信息
                                 calculation_details = {
@@ -2005,7 +2005,7 @@ with tab5:
             if trend == "上升":
                 if trend_strength == "显著":
                     st.error(
-                        f"⚠️ 预警：预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势！")
+                        f"⚠️ 预警：预测显示未来甲烷排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势！")
                     st.info("""
                     **紧急措施建议：**
                     - 立即检查曝气系统运行效率，优化DO控制（目标1.5-2.5mg/L）
@@ -2015,7 +2015,7 @@ with tab5:
                     - 检查污泥脱水系统运行，优化脱水剂投加
                     """)
                 else:
-                    st.warning(f"⚠️ 预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势")
+                    st.warning(f"⚠️ 预测显示未来甲烷排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势")
                     st.info("""
                     **优化建议：**
                     - 检查曝气系统效率，优化曝气量控制
@@ -2026,7 +2026,7 @@ with tab5:
             else:
                 if trend_strength == "显著":
                     st.success(
-                        f"✅ 良好：预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势！")
+                        f"✅ 良好：预测显示未来甲烷排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势！")
                     st.info("""
                     **巩固措施：**
                     - 继续保持当前优化运行参数
@@ -2035,7 +2035,7 @@ with tab5:
                     - 探索进一步优化空间，如精准加药控制系统
                     """)
                 else:
-                    st.success(f"✅ 预测显示未来碳排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势")
+                    st.success(f"✅ 预测显示未来甲烷排放将{trend}{change_percent:.1f}%，{trend_strength}{trend}趋势")
                     st.info("""
                     **保持措施：**
                     - 维持当前优化运行参数
@@ -2046,7 +2046,7 @@ with tab5:
             # 添加季节性建议
             if has_seasonal_pattern:
                 peak_month = monthly_avg.idxmax()
-                st.info(f"📈 检测到季节性模式：碳排放通常在{peak_month}月达到峰值，建议提前制定应对措施")
+                st.info(f"📈 检测到季节性模式：甲烷排放通常在{peak_month}月达到峰值，建议提前制定应对措施")
 
             # 添加技术投资建议（基于预测趋势动态推荐）
             st.subheader("减排技术投资建议")
@@ -2151,7 +2151,7 @@ with tab5:
                 st.info("这是基于历史平均值的简单预测，精度较低")
 
 with tab6:
-    st.header("碳减排技术对比分析")
+    st.header("甲烷减排技术对比分析")
 
     # 技术选择
     selected_techs = st.multiselect(
@@ -2235,7 +2235,7 @@ with tab6:
                         "投资成本": "500 万元",
                         "投资回收期": "5 年",
                         "适用性": "高",
-                        "碳减排贡献率": "25%",
+                        "甲烷减排贡献率": "25%",
                         "能源中和率": "30%"
                     },
                     "光伏发电": {
@@ -2243,7 +2243,7 @@ with tab6:
                         "投资成本": "300 万元",
                         "投资回收期": "8 年",
                         "适用性": "中",
-                        "碳减排贡献率": "15%",
+                        "甲烷减排贡献率": "15%",
                         "能源中和率": "40%"
                     },
                     "高效曝气": {
@@ -2251,7 +2251,7 @@ with tab6:
                         "投资成本": "200 万元",
                         "投资回收期": "4 年",
                         "适用性": "高",
-                        "碳减排贡献率": "20%",
+                        "甲烷减排贡献率": "20%",
                         "能源中和率": "10%"
                     },
                     "热泵技术": {
@@ -2259,7 +2259,7 @@ with tab6:
                         "投资成本": "150 万元",
                         "投资回收期": "6 年",
                         "适用性": "中",
-                        "碳减排贡献率": "12%",
+                        "甲烷减排贡献率": "12%",
                         "能源中和率": "15%"
                     },
                     "污泥干化": {
@@ -2267,7 +2267,7 @@ with tab6:
                         "投资成本": "100 万元",
                         "投资回收期": "7 年",
                         "适用性": "低",
-                        "碳减排贡献率": "8%",
+                        "甲烷减排贡献率": "8%",
                         "能源中和率": "5%"
                     },
                     "沼气发电": {
@@ -2275,7 +2275,7 @@ with tab6:
                         "投资成本": "400 万元",
                         "投资回收期": "5 年",
                         "适用性": "高",
-                        "碳减排贡献率": "20%",
+                        "甲烷减排贡献率": "20%",
                         "能源中和率": "35%"
                     }
     }
@@ -2291,11 +2291,11 @@ with tab6:
                         st.metric("投资回收期", tech_detail["投资回收期"])
                         st.metric("适用性", tech_detail["适用性"])
         with col3:
-                        st.metric("碳减排贡献率", tech_detail["碳减排贡献率"])
+                        st.metric("甲烷减排贡献率", tech_detail["甲烷减排贡献率"])
                         st.metric("能源中和率", tech_detail["能源中和率"])
 
-    # 碳抵消计算
-    st.subheader("碳抵消计算")
+    # 甲烷抵消计算
+    st.subheader("甲烷抵消计算")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         biogas = st.number_input("沼气发电量(kWh)", value=1000, min_value=0)
@@ -2311,11 +2311,11 @@ with tab6:
         st.session_state.carbon_offset_data["污泥资源化"] = sludge * 0.3
 
     total_offset = sum(st.session_state.carbon_offset_data.values())
-    st.metric("总碳抵消量", f"{total_offset:.2f} kgCO2eq")
+    st.metric("总甲烷抵消量", f"{total_offset:.2f} kgCO2eq")
 
 # 新增选项卡：因子库管理
 with tab7:
-    st.header("碳排放因子库管理")
+    st.header("甲烷排放因子库管理")
 
     # 检查是否是回退模式
     fallback_mode = hasattr(st.session_state.factor_db,
@@ -2324,7 +2324,7 @@ with tab7:
         st.warning("⚠️ 当前处于回退模式，使用默认因子值。某些功能可能受限。")
 
     # 显示当前因子
-    st.subheader("当前碳排放因子（权威来源）")
+    st.subheader("当前甲烷排放因子（权威来源）")
 
     # 定义默认因子数据
     default_factors_data = {
@@ -2340,7 +2340,7 @@ with tab7:
                              '2020-01-01', '2020-01-01', '2020-01-01', '2020-01-01', '2020-01-01'],
                 '描述': ['2021年全国电力平均二氧化碳排放因子', '聚合氯化铝排放因子', '聚丙烯酰胺排放因子',
                          '氧化亚氮全球变暖潜能值(GWP)', '甲烷全球变暖潜能值(GWP)', '次氯酸钠排放因子', '臭氧排放因子',
-                         '沼气发电碳抵消因子', '光伏发电碳抵消因子', '热泵技术碳抵消因子', '污泥资源化碳抵消因子']
+                         '沼气发电甲烷抵消因子', '光伏发电甲烷抵消因子', '热泵技术甲烷抵消因子', '污泥资源化甲烷抵消因子']
     }
 
     try:
@@ -2392,7 +2392,7 @@ with tab7:
         st.dataframe(default_df, height=400)
 
     # 因子更新界面
-    st.subheader("更新碳排放因子")
+    st.subheader("更新甲烷排放因子")
 
     # 在回退模式下禁用更新功能
     if fallback_mode:
